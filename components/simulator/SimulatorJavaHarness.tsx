@@ -1,0 +1,1469 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import AceEditor from "react-ace";
+import "ace-builds/src-noconflict/mode-java";
+import "ace-builds/src-noconflict/theme-monokai";
+import "ace-builds/src-noconflict/ext-language_tools";
+
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import F310Gamepad, { type F310State } from "@/components/simulator/F310Gamepad";
+import type { SimulatorBridge } from "@/lib/simulator/mechanismSimulator";
+
+interface SimulatorJavaHarnessProps {
+  bridge: SimulatorBridge;
+}
+
+type HarnessStatus = "loading" | "ready" | "running" | "error";
+
+interface HarnessLogEntry {
+  id: number;
+  tone: "default" | "error" | "success";
+  message: string;
+}
+
+interface HarnessFile {
+  id: string;
+  name: string;
+  content: string;
+}
+
+type UserOpModeType = "teleop" | "autonomous";
+
+function createSupportFiles(): Array<{ name: string; content: string }> {
+  return [
+    {
+      name: "SimulatorNative.java",
+      content: `package simulator.bridge;
+
+public class SimulatorNative {
+  public static native void setMotorPower(String deviceName, double power);
+  public static native int getMotorCurrentPosition(String deviceName);
+  public static native void setMotorTargetPosition(String deviceName, int targetTicks);
+  public static native void setMotorMode(String deviceName, String mode);
+  public static native boolean isMotorBusy(String deviceName);
+  public static native boolean getGamepadBoolean(int gamepadId, String controlName);
+  public static native float getGamepadFloat(int gamepadId, String controlName);
+  public static native boolean isOpModeActive();
+  public static native void setServoPosition(String deviceName, double position);
+  public static native void addTelemetry(String caption, String value);
+  public static native void waitForStart();
+}
+`,
+    },
+    {
+      name: "DcMotor.java",
+      content: `package com.qualcomm.robotcore.hardware;
+
+import simulator.bridge.SimulatorNative;
+
+public class DcMotor {
+  public enum RunMode {
+    RUN_WITHOUT_ENCODER,
+    RUN_TO_POSITION,
+    STOP_AND_RESET_ENCODER
+  }
+
+  private final String deviceName;
+  private RunMode runMode = RunMode.RUN_WITHOUT_ENCODER;
+
+  public DcMotor(String deviceName) {
+    this.deviceName = deviceName;
+  }
+
+  public void setPower(double power) {
+    SimulatorNative.setMotorPower(deviceName, power);
+  }
+
+  public int getCurrentPosition() {
+    return SimulatorNative.getMotorCurrentPosition(deviceName);
+  }
+
+  public void setTargetPosition(int targetTicks) {
+    SimulatorNative.setMotorTargetPosition(deviceName, targetTicks);
+  }
+
+  public void setMode(RunMode runMode) {
+    this.runMode = runMode;
+    SimulatorNative.setMotorMode(deviceName, runMode.name());
+  }
+
+  public RunMode getMode() {
+    return runMode;
+  }
+
+  public boolean isBusy() {
+    return SimulatorNative.isMotorBusy(deviceName);
+  }
+}
+`,
+    },
+    {
+      name: "Gamepad.java",
+      content: `package com.qualcomm.robotcore.hardware;
+
+import simulator.bridge.SimulatorNative;
+
+public class Gamepad {
+  public boolean a;
+  public boolean b;
+  public boolean x;
+  public boolean y;
+  public boolean dpad_up;
+  public boolean dpad_down;
+  public boolean dpad_left;
+  public boolean dpad_right;
+  public boolean left_bumper;
+  public boolean right_bumper;
+  public boolean left_stick_button;
+  public boolean right_stick_button;
+  public boolean back;
+  public boolean start;
+  public boolean guide;
+  public float left_stick_x;
+  public float left_stick_y;
+  public float right_stick_x;
+  public float right_stick_y;
+  public float left_trigger;
+  public float right_trigger;
+
+  private final int gamepadId;
+
+  public Gamepad(int gamepadId) {
+    this.gamepadId = gamepadId;
+  }
+
+  public void __syncFromSimulator() {
+    a = SimulatorNative.getGamepadBoolean(gamepadId, "a");
+    b = SimulatorNative.getGamepadBoolean(gamepadId, "b");
+    x = SimulatorNative.getGamepadBoolean(gamepadId, "x");
+    y = SimulatorNative.getGamepadBoolean(gamepadId, "y");
+    dpad_up = SimulatorNative.getGamepadBoolean(gamepadId, "dpad_up");
+    dpad_down = SimulatorNative.getGamepadBoolean(gamepadId, "dpad_down");
+    dpad_left = SimulatorNative.getGamepadBoolean(gamepadId, "dpad_left");
+    dpad_right = SimulatorNative.getGamepadBoolean(gamepadId, "dpad_right");
+    left_bumper = SimulatorNative.getGamepadBoolean(gamepadId, "left_bumper");
+    right_bumper = SimulatorNative.getGamepadBoolean(gamepadId, "right_bumper");
+    left_stick_button = SimulatorNative.getGamepadBoolean(gamepadId, "left_stick_button");
+    right_stick_button = SimulatorNative.getGamepadBoolean(gamepadId, "right_stick_button");
+    back = SimulatorNative.getGamepadBoolean(gamepadId, "back");
+    start = SimulatorNative.getGamepadBoolean(gamepadId, "start");
+    guide = SimulatorNative.getGamepadBoolean(gamepadId, "guide");
+    left_stick_x = SimulatorNative.getGamepadFloat(gamepadId, "left_stick_x");
+    left_stick_y = SimulatorNative.getGamepadFloat(gamepadId, "left_stick_y");
+    right_stick_x = SimulatorNative.getGamepadFloat(gamepadId, "right_stick_x");
+    right_stick_y = SimulatorNative.getGamepadFloat(gamepadId, "right_stick_y");
+    left_trigger = SimulatorNative.getGamepadFloat(gamepadId, "left_trigger");
+    right_trigger = SimulatorNative.getGamepadFloat(gamepadId, "right_trigger");
+  }
+}
+`,
+    },
+    {
+      name: "ElapsedTime.java",
+      content: `package com.qualcomm.robotcore.util;
+
+public class ElapsedTime {
+  private long startTimeNanos;
+
+  public ElapsedTime() {
+    reset();
+  }
+
+  public void reset() {
+    startTimeNanos = System.nanoTime();
+  }
+
+  public double seconds() {
+    return (System.nanoTime() - startTimeNanos) / 1_000_000_000.0;
+  }
+}
+`,
+    },
+    {
+      name: "Servo.java",
+      content: `package com.qualcomm.robotcore.hardware;
+
+import simulator.bridge.SimulatorNative;
+
+public class Servo {
+  private final String deviceName;
+
+  public Servo(String deviceName) {
+    this.deviceName = deviceName;
+  }
+
+  public void setPosition(double position) {
+    SimulatorNative.setServoPosition(deviceName, position);
+  }
+}
+`,
+    },
+    {
+      name: "Autonomous.java",
+      content: `package com.qualcomm.robotcore.eventloop.opmode;
+
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.TYPE)
+public @interface Autonomous {
+  String name() default "";
+}
+`,
+    },
+    {
+      name: "TeleOp.java",
+      content: `package com.qualcomm.robotcore.eventloop.opmode;
+
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.TYPE)
+public @interface TeleOp {
+  String name() default "";
+}
+`,
+    },
+    {
+      name: "Telemetry.java",
+      content: `package com.qualcomm.robotcore.eventloop.opmode;
+
+import simulator.bridge.SimulatorNative;
+
+public class Telemetry {
+  public void addData(String caption, Object value) {
+    SimulatorNative.addTelemetry(caption, String.valueOf(value));
+  }
+}
+`,
+    },
+    {
+      name: "HardwareMap.java",
+      content: `package com.qualcomm.robotcore.hardware;
+
+public class HardwareMap {
+  public <T> T get(Class<T> deviceClass, String deviceName) {
+    if (deviceClass == DcMotor.class) {
+      return deviceClass.cast(new DcMotor(deviceName));
+    }
+
+    if (deviceClass == Servo.class) {
+      return deviceClass.cast(new Servo(deviceName));
+    }
+
+    throw new IllegalArgumentException(
+      "Unsupported mock hardware device: " + deviceClass.getSimpleName() + " named " + deviceName
+    );
+  }
+}
+`,
+    },
+    {
+      name: "OpMode.java",
+      content: `package com.qualcomm.robotcore.eventloop.opmode;
+
+import com.qualcomm.robotcore.hardware.Gamepad;
+import com.qualcomm.robotcore.hardware.HardwareMap;
+
+public abstract class OpMode {
+  public final HardwareMap hardwareMap = new HardwareMap();
+  public final Telemetry telemetry = new Telemetry();
+  public final Gamepad gamepad1 = new Gamepad(1);
+  public final Gamepad gamepad2 = new Gamepad(2);
+
+  public void init() {}
+
+  public void start() {}
+
+  public abstract void loop();
+
+  public void stop() {}
+}
+`,
+    },
+    {
+      name: "LinearOpMode.java",
+      content: `package com.qualcomm.robotcore.eventloop.opmode;
+
+import simulator.bridge.SimulatorNative;
+
+public abstract class LinearOpMode extends OpMode {
+  private boolean started = false;
+
+  public abstract void runOpMode() throws Exception;
+
+  public void sleep(long milliseconds) throws InterruptedException {
+    Thread.sleep(milliseconds);
+  }
+
+  public void waitForStart() {
+    telemetry.addData("opMode", "waiting for start");
+    SimulatorNative.waitForStart();
+    started = true;
+    gamepad1.__syncFromSimulator();
+    gamepad2.__syncFromSimulator();
+    telemetry.addData("opMode", "started");
+  }
+
+  public boolean opModeIsActive() {
+    gamepad1.__syncFromSimulator();
+    gamepad2.__syncFromSimulator();
+    return started && SimulatorNative.isOpModeActive();
+  }
+
+  @Override
+  public final void loop() {}
+}
+`,
+    },
+    {
+      name: "Main.java",
+      content: `package simulator.launcher;
+
+import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
+import com.qualcomm.robotcore.eventloop.opmode.OpMode;
+
+public class Main {
+  public static void main(String[] args) throws Exception {
+    String opModeClassName = args.length > 0
+      ? args[0]
+      : "org.firstinspires.ftc.teamcode.MechanismTestOpMode";
+    Class<?> opModeClass = Class.forName(opModeClassName);
+    Object instance = opModeClass.getDeclaredConstructor().newInstance();
+
+    if (instance instanceof LinearOpMode) {
+      ((LinearOpMode) instance).runOpMode();
+      return;
+    }
+
+    if (instance instanceof OpMode) {
+      OpMode opMode = (OpMode) instance;
+      opMode.init();
+      simulator.bridge.SimulatorNative.addTelemetry("opMode", "waiting for start");
+      simulator.bridge.SimulatorNative.waitForStart();
+      opMode.start();
+
+      while (simulator.bridge.SimulatorNative.isOpModeActive()) {
+        opMode.gamepad1.__syncFromSimulator();
+        opMode.gamepad2.__syncFromSimulator();
+        opMode.loop();
+        Thread.sleep(50);
+      }
+
+      opMode.stop();
+      return;
+    }
+
+    throw new IllegalArgumentException("Unsupported op mode class: " + opModeClassName);
+  }
+}
+`,
+    },
+  ];
+}
+
+function createAutonomousTemplate(): HarnessFile[] {
+  return [
+    {
+      id: "1",
+      name: "MechanismTestOpMode.java",
+      content: `package org.firstinspires.ftc.teamcode;
+
+import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
+import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
+import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.Servo;
+import com.qualcomm.robotcore.util.ElapsedTime;
+
+@Autonomous(name = "Mechanism Test Auto")
+public class MechanismTestOpMode extends LinearOpMode {
+  @Override
+  public void runOpMode() throws Exception {
+    DcMotor armMotor = hardwareMap.get(DcMotor.class, "armMotor");
+    Servo clawServo = hardwareMap.get(Servo.class, "clawServo");
+    ElapsedTime timer = new ElapsedTime();
+
+    telemetry.addData("status", "initialized");
+    waitForStart();
+
+    if (!opModeIsActive()) {
+      return;
+    }
+
+    timer.reset();
+    armMotor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+    armMotor.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+    telemetry.addData("status", "starting mechanism test");
+    clawServo.setPosition(1.0);
+    sleep(500);
+
+    armMotor.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+    armMotor.setTargetPosition(780);
+    armMotor.setPower(1.0);
+    while (opModeIsActive() && armMotor.isBusy()) {
+      telemetry.addData("phase", "raising to target");
+      telemetry.addData("armTicks", armMotor.getCurrentPosition());
+      telemetry.addData("elapsed", String.format("%.2f", timer.seconds()));
+      sleep(120);
+    }
+
+    clawServo.setPosition(0.1);
+    telemetry.addData("claw", "closing");
+    sleep(450);
+
+    armMotor.setTargetPosition(220);
+    armMotor.setPower(0.85);
+    while (opModeIsActive() && armMotor.isBusy()) {
+      telemetry.addData("phase", "lowering to target");
+      telemetry.addData("armTicks", armMotor.getCurrentPosition());
+      telemetry.addData("elapsed", String.format("%.2f", timer.seconds()));
+      sleep(120);
+    }
+
+    telemetry.addData("finalTicks", armMotor.getCurrentPosition());
+    telemetry.addData("totalTime", String.format("%.2f", timer.seconds()));
+    telemetry.addData("status", "mechanism test complete");
+  }
+}
+`,
+    },
+  ];
+}
+
+function createTeleOpTemplate(): HarnessFile[] {
+  return [
+    {
+      id: "1",
+      name: "MechanismTeleOp.java",
+      content: `package org.firstinspires.ftc.teamcode;
+
+import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
+import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
+import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.Servo;
+
+@TeleOp(name = "Mechanism TeleOp")
+public class MechanismTeleOp extends LinearOpMode {
+  @Override
+  public void runOpMode() throws Exception {
+    DcMotor leftFront = hardwareMap.get(DcMotor.class, "leftFront");
+    DcMotor rightFront = hardwareMap.get(DcMotor.class, "rightFront");
+    DcMotor armMotor = hardwareMap.get(DcMotor.class, "armMotor");
+    Servo clawServo = hardwareMap.get(Servo.class, "clawServo");
+
+    leftFront.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+    rightFront.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+    armMotor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+    armMotor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+    telemetry.addData("status", "teleop ready");
+    waitForStart();
+
+    while (opModeIsActive()) {
+      double drive = -gamepad1.left_stick_y;
+      double turn = gamepad1.right_stick_x;
+      double leftPower = Math.max(-1.0, Math.min(1.0, drive + turn));
+      double rightPower = Math.max(-1.0, Math.min(1.0, drive - turn));
+
+      leftFront.setPower(leftPower);
+      rightFront.setPower(rightPower);
+
+      if (gamepad1.y) {
+        armMotor.setPower(0.8);
+      } else if (gamepad1.a) {
+        armMotor.setPower(-0.55);
+      } else {
+        armMotor.setPower(0.0);
+      }
+
+      if (gamepad1.right_bumper) {
+        clawServo.setPosition(1.0);
+      } else if (gamepad1.left_bumper) {
+        clawServo.setPosition(0.1);
+      }
+
+      telemetry.addData("mode", "teleop");
+      telemetry.addData("drive", String.format("L %.2f / R %.2f", leftPower, rightPower));
+      telemetry.addData("armTicks", armMotor.getCurrentPosition());
+      telemetry.addData("controls", "Left stick drive, right stick turn, Y/A arm, RB/LB claw");
+      sleep(50);
+    }
+  }
+}
+`,
+    },
+  ];
+}
+
+function detectUserOpModeType(files: HarnessFile[]): UserOpModeType {
+  const source = files.map((file) => file.content).join("\n");
+  if (source.includes("@TeleOp")) {
+    return "teleop";
+  }
+  if (source.includes("@Autonomous")) {
+    return "autonomous";
+  }
+  if (source.includes("extends OpMode")) {
+    return "teleop";
+  }
+  return "autonomous";
+}
+
+function detectUserOpModeClassName(files: HarnessFile[]): string {
+  const primaryFile = files[0];
+  if (!primaryFile) {
+    return "org.firstinspires.ftc.teamcode.MechanismTestOpMode";
+  }
+
+  const packageMatch = primaryFile.content.match(/package\s+([a-zA-Z0-9_.]+)\s*;/);
+  const classMatch = primaryFile.content.match(/public\s+class\s+([A-Za-z0-9_]+)/);
+  const packageName = packageMatch?.[1] ?? "org.firstinspires.ftc.teamcode";
+  const className = classMatch?.[1] ?? "MechanismTestOpMode";
+
+  return `${packageName}.${className}`;
+}
+
+const HARNESS_HTML = `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: #020617;
+        color: #e2e8f0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      #status {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 100%;
+        font-size: 13px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #94a3b8;
+      }
+    </style>
+    <script src="https://cjrtnc.leaningtech.com/4.2/loader.js"></script>
+  </head>
+  <body>
+    <div id="status">Loading CheerpJ harness…</div>
+    <script>
+      const statusEl = document.getElementById("status");
+
+      function setStatus(label) {
+        statusEl.textContent = label;
+      }
+
+      function notifyParent(type, payload) {
+        parent.postMessage({ type, ...payload }, "*");
+      }
+
+      async function detectToolsJarPath() {
+        const candidates = ["/app/tools.jar", "/tools.jar"];
+
+        for (const candidate of candidates) {
+          try {
+            const response = await fetch(candidate, { method: "HEAD" });
+            if (response.ok) {
+              return candidate;
+            }
+          } catch (error) {
+            console.warn("Unable to probe tools.jar candidate", candidate, error);
+          }
+        }
+
+        return null;
+      }
+
+      async function Java_simulator_bridge_SimulatorNative_setMotorPower(lib, deviceName, power) {
+        notifyParent("sim-java-motor-power", {
+          deviceName: String(deviceName),
+          power: Number(power),
+        });
+      }
+
+      async function Java_simulator_bridge_SimulatorNative_getMotorCurrentPosition(lib, deviceName) {
+        return await new Promise((resolve) => {
+          const requestId = "motor-pos-" + Math.random().toString(36).slice(2);
+          function handleMessage(event) {
+            if (
+              event.source !== parent ||
+              !event.data ||
+              event.data.type !== "sim-java-motor-position-response" ||
+              event.data.requestId !== requestId
+            ) {
+              return;
+            }
+
+            window.removeEventListener("message", handleMessage);
+            resolve(Number(event.data.position));
+          }
+
+          window.addEventListener("message", handleMessage);
+          notifyParent("sim-java-motor-position-request", {
+            requestId,
+            deviceName: String(deviceName),
+          });
+        });
+      }
+
+      async function Java_simulator_bridge_SimulatorNative_setMotorTargetPosition(
+        lib,
+        deviceName,
+        targetTicks
+      ) {
+        notifyParent("sim-java-set-motor-target-position", {
+          deviceName: String(deviceName),
+          targetTicks: Number(targetTicks),
+        });
+      }
+
+      async function Java_simulator_bridge_SimulatorNative_setMotorMode(lib, deviceName, mode) {
+        notifyParent("sim-java-set-motor-mode", {
+          deviceName: String(deviceName),
+          mode: String(mode),
+        });
+      }
+
+      async function Java_simulator_bridge_SimulatorNative_isMotorBusy(lib, deviceName) {
+        return await new Promise((resolve) => {
+          const requestId = "motor-busy-" + Math.random().toString(36).slice(2);
+          function handleMessage(event) {
+            if (
+              event.source !== parent ||
+              !event.data ||
+              event.data.type !== "sim-java-motor-busy-response" ||
+              event.data.requestId !== requestId
+            ) {
+              return;
+            }
+
+            window.removeEventListener("message", handleMessage);
+            resolve(Boolean(event.data.busy));
+          }
+
+          window.addEventListener("message", handleMessage);
+          notifyParent("sim-java-motor-busy-request", {
+            requestId,
+            deviceName: String(deviceName),
+          });
+        });
+      }
+
+      async function Java_simulator_bridge_SimulatorNative_getGamepadBoolean(
+        lib,
+        gamepadId,
+        controlName
+      ) {
+        return await new Promise((resolve) => {
+          const requestId = "gamepad-" + Math.random().toString(36).slice(2);
+          function handleMessage(event) {
+            if (
+              event.source !== parent ||
+              !event.data ||
+              event.data.type !== "sim-java-gamepad-response" ||
+              event.data.requestId !== requestId
+            ) {
+              return;
+            }
+
+            window.removeEventListener("message", handleMessage);
+            resolve(Boolean(event.data.value));
+          }
+
+          window.addEventListener("message", handleMessage);
+          notifyParent("sim-java-gamepad-request", {
+            requestId,
+            gamepadId: Number(gamepadId),
+            controlName: String(controlName),
+          });
+        });
+      }
+
+      async function Java_simulator_bridge_SimulatorNative_getGamepadFloat(
+        lib,
+        gamepadId,
+        controlName
+      ) {
+        return await new Promise((resolve) => {
+          const requestId = "gamepad-float-" + Math.random().toString(36).slice(2);
+          function handleMessage(event) {
+            if (
+              event.source !== parent ||
+              !event.data ||
+              event.data.type !== "sim-java-gamepad-float-response" ||
+              event.data.requestId !== requestId
+            ) {
+              return;
+            }
+
+            window.removeEventListener("message", handleMessage);
+            resolve(Number(event.data.value));
+          }
+
+          window.addEventListener("message", handleMessage);
+          notifyParent("sim-java-gamepad-float-request", {
+            requestId,
+            gamepadId: Number(gamepadId),
+            controlName: String(controlName),
+          });
+        });
+      }
+
+      let opModeActive = false;
+
+      async function Java_simulator_bridge_SimulatorNative_isOpModeActive() {
+        return opModeActive;
+      }
+
+      async function Java_simulator_bridge_SimulatorNative_setServoPosition(lib, deviceName, position) {
+        notifyParent("sim-java-servo-position", {
+          deviceName: String(deviceName),
+          position: Number(position),
+        });
+      }
+
+      async function Java_simulator_bridge_SimulatorNative_addTelemetry(lib, caption, value) {
+        notifyParent("sim-java-telemetry", {
+          caption: String(caption),
+          value: String(value),
+        });
+      }
+
+      let startResolver = null;
+      let hasPendingStart = false;
+
+      async function Java_simulator_bridge_SimulatorNative_waitForStart() {
+        notifyParent("sim-java-waiting-for-start", {});
+        setStatus("Waiting for start signal…");
+
+        if (hasPendingStart) {
+          hasPendingStart = false;
+          opModeActive = true;
+          notifyParent("sim-java-started", {});
+          setStatus("Java demo running…");
+          return;
+        }
+
+        await new Promise((resolve) => {
+          startResolver = () => {
+            startResolver = null;
+            opModeActive = true;
+            notifyParent("sim-java-started", {});
+            setStatus("Java demo running…");
+            resolve();
+          };
+        });
+      }
+
+      async function init() {
+        try {
+          await cheerpjInit({
+            version: 8,
+            natives: {
+              Java_simulator_bridge_SimulatorNative_setMotorPower,
+              Java_simulator_bridge_SimulatorNative_getMotorCurrentPosition,
+              Java_simulator_bridge_SimulatorNative_setMotorTargetPosition,
+              Java_simulator_bridge_SimulatorNative_setMotorMode,
+              Java_simulator_bridge_SimulatorNative_isMotorBusy,
+              Java_simulator_bridge_SimulatorNative_getGamepadBoolean,
+              Java_simulator_bridge_SimulatorNative_getGamepadFloat,
+              Java_simulator_bridge_SimulatorNative_isOpModeActive,
+              Java_simulator_bridge_SimulatorNative_setServoPosition,
+              Java_simulator_bridge_SimulatorNative_addTelemetry,
+              Java_simulator_bridge_SimulatorNative_waitForStart,
+            },
+            status: "none",
+          });
+          setStatus("CheerpJ harness ready");
+          notifyParent("sim-java-ready", {});
+        } catch (error) {
+          setStatus("CheerpJ harness failed");
+          notifyParent("sim-java-error", {
+            message: error && error.message ? error.message : String(error),
+          });
+        }
+      }
+
+      window.addEventListener("message", async (event) => {
+        if (!event.data) {
+          return;
+        }
+
+        if (event.data.type === "sim-java-start-opmode") {
+          if (startResolver) {
+            startResolver();
+          } else {
+            hasPendingStart = true;
+          }
+          return;
+        }
+
+        if (event.data.type === "sim-java-stop-opmode") {
+          opModeActive = false;
+          hasPendingStart = false;
+          startResolver = null;
+          setStatus("OpMode stopped");
+          return;
+        }
+
+        if (
+          event.data.type === "sim-java-motor-position-response" ||
+          event.data.type === "sim-java-motor-busy-response" ||
+          event.data.type === "sim-java-gamepad-response" ||
+          event.data.type === "sim-java-gamepad-float-response"
+        ) {
+          return;
+        }
+
+        if (event.data.type !== "sim-java-run-demo") {
+          return;
+        }
+
+        const files = event.data.files || [];
+        const mainClassName = event.data.mainClassName;
+        opModeActive = false;
+        hasPendingStart = false;
+        startResolver = null;
+        setStatus("Compiling Java demo…");
+        notifyParent("sim-java-log", { message: "Compiling Java bridge demo..." });
+
+        try {
+          const encoder = new TextEncoder();
+          for (const file of files) {
+            cheerpOSAddStringFile("/str/" + file.name, encoder.encode(file.content));
+          }
+
+          const toolsJarPath = await detectToolsJarPath();
+          if (!toolsJarPath) {
+            setStatus("Compiler runtime missing");
+            notifyParent("sim-java-error", {
+              message:
+                "CheerpJ compiler runtime tools.jar could not be found at /app/tools.jar or /tools.jar.",
+            });
+            return;
+          }
+
+          notifyParent("sim-java-log", {
+            message: "Using compiler runtime: " + toolsJarPath,
+          });
+
+          const classPath = toolsJarPath + ":/files/";
+          const javaFiles = files.map((file) => "/str/" + file.name);
+          const compileResult = await cheerpjRunMain(
+            "com.sun.tools.javac.Main",
+            classPath,
+            ...javaFiles,
+            "-d",
+            "/files/",
+            "-Xlint"
+          );
+
+          if (compileResult !== 0) {
+            setStatus("Compilation failed");
+            notifyParent("sim-java-error", {
+              message:
+                "Java demo compilation failed inside CheerpJ. javac exit code: " +
+                String(compileResult),
+            });
+            return;
+          }
+
+          setStatus("Running Java demo…");
+          notifyParent("sim-java-log", { message: "Running Java bridge demo..." });
+          await cheerpjRunMain("simulator.launcher.Main", classPath, mainClassName);
+          opModeActive = false;
+          setStatus("Java demo complete");
+          notifyParent("sim-java-complete", {});
+        } catch (error) {
+          opModeActive = false;
+          setStatus("Java demo failed");
+          notifyParent("sim-java-error", {
+            message: error && error.message ? error.message : String(error),
+          });
+        }
+      });
+
+      init();
+    </script>
+  </body>
+</html>`;
+
+export default function SimulatorJavaHarness({
+  bridge,
+}: SimulatorJavaHarnessProps) {
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [status, setStatus] = useState<HarnessStatus>("loading");
+  const [awaitingStart, setAwaitingStart] = useState(false);
+  const [pendingRun, setPendingRun] = useState(false);
+  const [files, setFiles] = useState<HarnessFile[]>(() => createAutonomousTemplate());
+  const [activeFileId, setActiveFileId] = useState("1");
+  const [gamepadState, setGamepadState] = useState<F310State>({
+    buttons: {
+      a: false,
+      b: false,
+      x: false,
+      y: false,
+      dpad_up: false,
+      dpad_down: false,
+      dpad_left: false,
+      dpad_right: false,
+      left_bumper: false,
+      right_bumper: false,
+      left_stick_button: false,
+      right_stick_button: false,
+      back: false,
+      start: false,
+      guide: false,
+    },
+    axes: {
+      left_stick_x: 0,
+      left_stick_y: 0,
+      right_stick_x: 0,
+      right_stick_y: 0,
+      left_trigger: 0,
+      right_trigger: 0,
+    },
+  });
+  const [logEntries, setLogEntries] = useState<HarnessLogEntry[]>([
+    { id: 1, tone: "default", message: "Preparing isolated CheerpJ harness..." },
+  ]);
+
+  const activeFile = useMemo(
+    () => files.find((file) => file.id === activeFileId) ?? files[0],
+    [activeFileId, files]
+  );
+  const detectedOpModeType = useMemo(() => detectUserOpModeType(files), [files]);
+  const detectedOpModeClassName = useMemo(() => detectUserOpModeClassName(files), [files]);
+
+  const appendLog = useCallback((message: string, tone: HarnessLogEntry["tone"] = "default") => {
+    setLogEntries((previousEntries) => [
+      ...previousEntries,
+      {
+        id: previousEntries.length + 1,
+        tone,
+        message,
+      },
+    ].slice(-10));
+  }, []);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.source !== iframeRef.current?.contentWindow || !event.data?.type) {
+        return;
+      }
+
+      switch (event.data.type) {
+        case "sim-java-ready":
+          setStatus("ready");
+          appendLog("CheerpJ simulator runtime is ready.", "success");
+          break;
+        case "sim-java-log":
+          appendLog(String(event.data.message));
+          break;
+        case "sim-java-waiting-for-start":
+          setStatus("ready");
+          setAwaitingStart(true);
+          appendLog("OpMode initialized and waiting for start.", "success");
+          break;
+        case "sim-java-started":
+          setStatus("running");
+          setAwaitingStart(false);
+          appendLog("Start signal delivered to Java opmode.", "success");
+          break;
+        case "sim-java-motor-power":
+          bridge.setMotorPower(String(event.data.deviceName), Number(event.data.power));
+          break;
+        case "sim-java-motor-position-request":
+          iframeRef.current?.contentWindow?.postMessage(
+            {
+              type: "sim-java-motor-position-response",
+              requestId: String(event.data.requestId),
+              position: bridge.getMotorCurrentPosition(String(event.data.deviceName)),
+            },
+            "*"
+          );
+          break;
+        case "sim-java-set-motor-target-position":
+          bridge.setMotorTargetPosition(
+            String(event.data.deviceName),
+            Number(event.data.targetTicks)
+          );
+          break;
+        case "sim-java-set-motor-mode":
+          bridge.setMotorMode(
+            String(event.data.deviceName),
+            String(event.data.mode) as
+              | "RUN_WITHOUT_ENCODER"
+              | "RUN_TO_POSITION"
+              | "STOP_AND_RESET_ENCODER"
+          );
+          break;
+        case "sim-java-motor-busy-request":
+          iframeRef.current?.contentWindow?.postMessage(
+            {
+              type: "sim-java-motor-busy-response",
+              requestId: String(event.data.requestId),
+              busy: bridge.isMotorBusy(String(event.data.deviceName)),
+            },
+            "*"
+          );
+          break;
+        case "sim-java-gamepad-request":
+          iframeRef.current?.contentWindow?.postMessage(
+            {
+              type: "sim-java-gamepad-response",
+              requestId: String(event.data.requestId),
+              value: Boolean(
+                gamepadState.buttons[
+                  String(event.data.controlName) as keyof typeof gamepadState.buttons
+                ]
+              ),
+            },
+            "*"
+          );
+          break;
+        case "sim-java-gamepad-float-request":
+          iframeRef.current?.contentWindow?.postMessage(
+            {
+              type: "sim-java-gamepad-float-response",
+              requestId: String(event.data.requestId),
+              value: Number(
+                gamepadState.axes[
+                  String(event.data.controlName) as keyof typeof gamepadState.axes
+                ] ?? 0
+              ),
+            },
+            "*"
+          );
+          break;
+        case "sim-java-servo-position":
+          bridge.setServoPosition(String(event.data.deviceName), Number(event.data.position));
+          break;
+        case "sim-java-telemetry":
+          bridge.addTelemetry(String(event.data.caption), String(event.data.value));
+          break;
+        case "sim-java-complete":
+          setStatus("ready");
+          setAwaitingStart(false);
+          setPendingRun(false);
+          appendLog("User code completed against the simulator runtime.", "success");
+          break;
+        case "sim-java-error":
+          setStatus("error");
+          setAwaitingStart(false);
+          setPendingRun(false);
+          appendLog(String(event.data.message), "error");
+          break;
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => {
+      window.removeEventListener("message", handleMessage);
+    };
+  }, [appendLog, bridge, gamepadState]);
+
+  const postRunDemo = useCallback(() => {
+    if (!iframeRef.current?.contentWindow) {
+      appendLog("Harness iframe is not ready yet.", "error");
+      return;
+    }
+
+    setStatus("running");
+    setAwaitingStart(false);
+    setPendingRun(false);
+    bridge.reset();
+    appendLog("Compiling user code with the hidden simulator runtime...");
+    iframeRef.current.contentWindow.postMessage(
+      {
+        type: "sim-java-run-demo",
+        files: [
+          ...createSupportFiles(),
+          ...files.map(({ name, content }) => ({ name, content })),
+        ],
+        mainClassName: detectedOpModeClassName,
+      },
+      "*"
+    );
+  }, [appendLog, bridge, detectedOpModeClassName, files]);
+
+  const runDemo = useCallback(() => {
+    if (status === "loading") {
+      setPendingRun(true);
+      appendLog("Harness still loading. Demo will start automatically when ready.");
+      return;
+    }
+
+    if (status === "running") {
+      appendLog("Java demo is already running.");
+      return;
+    }
+
+    postRunDemo();
+  }, [appendLog, postRunDemo, status]);
+
+  useEffect(() => {
+    if (status === "ready" && pendingRun) {
+      postRunDemo();
+    }
+  }, [pendingRun, postRunDemo, status]);
+
+  const startOpMode = useCallback(() => {
+    if (!iframeRef.current?.contentWindow) {
+      appendLog("Harness iframe is not ready yet.", "error");
+      return;
+    }
+
+    appendLog("Sending start signal to Java opmode...");
+    iframeRef.current.contentWindow.postMessage(
+      {
+        type: "sim-java-start-opmode",
+      },
+      "*"
+    );
+  }, [appendLog]);
+
+  const stopOpMode = useCallback(() => {
+    if (!iframeRef.current?.contentWindow) {
+      appendLog("Harness iframe is not ready yet.", "error");
+      return;
+    }
+
+    setAwaitingStart(false);
+    setPendingRun(false);
+    appendLog("Sending stop signal to Java opmode...");
+    iframeRef.current.contentWindow.postMessage(
+      {
+        type: "sim-java-stop-opmode",
+      },
+      "*"
+    );
+  }, [appendLog]);
+
+  const resetFiles = useCallback(() => {
+    setFiles(createAutonomousTemplate());
+    setActiveFileId("1");
+    appendLog("Editable user files reset to defaults.", "success");
+  }, [appendLog]);
+
+  const loadTeleOpTemplate = useCallback(() => {
+    setFiles(createTeleOpTemplate());
+    setActiveFileId("1");
+    appendLog("Loaded FTC-style teleop template.", "success");
+  }, [appendLog]);
+
+  const loadAutonomousTemplate = useCallback(() => {
+    setFiles(createAutonomousTemplate());
+    setActiveFileId("1");
+    appendLog("Loaded FTC-style autonomous template.", "success");
+  }, [appendLog]);
+
+  const handleFileChange = useCallback((nextContent: string) => {
+    setFiles((previousFiles) =>
+      previousFiles.map((file) =>
+        file.id === activeFileId ? { ...file, content: nextContent } : file
+      )
+    );
+  }, [activeFileId]);
+
+  const statusLabel = useMemo(() => {
+    switch (status) {
+      case "loading":
+        return "Loading harness";
+      case "ready":
+        return "Ready for Java demo";
+      case "running":
+        return "Running Java demo";
+      case "error":
+        return "Harness error";
+    }
+  }, [status]);
+
+  const conflictingControls = useMemo<Record<string, string[]>>(
+    () => ({
+      a: ["y"],
+      y: ["a"],
+      left_bumper: ["right_bumper"],
+      right_bumper: ["left_bumper"],
+      dpad_up: ["dpad_down"],
+      dpad_down: ["dpad_up"],
+      dpad_left: ["dpad_right"],
+      dpad_right: ["dpad_left"],
+    }),
+    []
+  );
+
+  const setGamepadButtonState = useCallback(
+    (controlName: string, nextValue: boolean) => {
+      setGamepadState((previousState) => {
+        const nextState = {
+          ...previousState,
+          buttons: {
+            ...previousState.buttons,
+            [controlName]: nextValue,
+          },
+        };
+
+        if (nextValue) {
+          for (const conflictingControl of conflictingControls[controlName] ?? []) {
+            nextState.buttons[conflictingControl as keyof typeof nextState.buttons] = false;
+          }
+        }
+
+        return nextState;
+      });
+    },
+    [conflictingControls]
+  );
+
+  const clearGamepad = useCallback(() => {
+    setGamepadState({
+      buttons: {
+        a: false,
+        b: false,
+        x: false,
+        y: false,
+        dpad_up: false,
+        dpad_down: false,
+        dpad_left: false,
+        dpad_right: false,
+        left_bumper: false,
+        right_bumper: false,
+        left_stick_button: false,
+        right_stick_button: false,
+        back: false,
+        start: false,
+        guide: false,
+      },
+      axes: {
+        left_stick_x: 0,
+        left_stick_y: 0,
+        right_stick_x: 0,
+        right_stick_y: 0,
+        left_trigger: 0,
+        right_trigger: 0,
+      },
+    });
+  }, []);
+
+  const setGamepadAxisState = useCallback(
+    (
+      axisName:
+        | "left_stick_x"
+        | "left_stick_y"
+        | "right_stick_x"
+        | "right_stick_y"
+        | "left_trigger"
+        | "right_trigger",
+      nextValue: number
+    ) => {
+      setGamepadState((previousState) => ({
+        ...previousState,
+        axes: {
+          ...previousState.axes,
+          [axisName]: nextValue,
+        },
+      }));
+    },
+    []
+  );
+
+  const bindGamepadPress = useCallback(
+    (controlName: string) => ({
+      onMouseDown: () => setGamepadButtonState(controlName, true),
+      onMouseUp: () => setGamepadButtonState(controlName, false),
+      onMouseLeave: () => setGamepadButtonState(controlName, false),
+      onTouchStart: () => setGamepadButtonState(controlName, true),
+      onTouchEnd: () => setGamepadButtonState(controlName, false),
+      onTouchCancel: () => setGamepadButtonState(controlName, false),
+    }),
+    [setGamepadButtonState]
+  );
+
+  return (
+    <Card className="border-slate-800 bg-slate-950/80 text-slate-100 shadow-none">
+      <CardHeader>
+        <CardTitle className="text-xl text-white">Java Bridge Harness</CardTitle>
+        <CardDescription className="text-slate-400">
+          Isolated CheerpJ runtime with a tiny FTC-style mock package backed by native methods that
+          forward Java calls into the simulator bridge.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-1">
+            <div className="text-sm text-slate-300">{statusLabel}</div>
+            <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+              Detected {detectedOpModeType === "teleop" ? "TeleOp" : "Autonomous"} opmode
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <Button onClick={runDemo} disabled={status === "running"}>
+              Load Code
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={startOpMode}
+              disabled={!awaitingStart}
+            >
+              Start OpMode
+            </Button>
+            <Button
+              variant="outline"
+              onClick={stopOpMode}
+              className="bg-slate-900 text-slate-100"
+            >
+              Stop OpMode
+            </Button>
+            <Button variant="outline" onClick={resetFiles} className="bg-slate-900 text-slate-100">
+              Reset Files
+            </Button>
+          </div>
+        </div>
+
+        <iframe
+          ref={iframeRef}
+          srcDoc={HARNESS_HTML}
+          title="Simulator Java Harness"
+          className="h-24 w-full rounded-2xl border border-slate-800 bg-slate-950"
+        />
+
+        <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950">
+          <div className="border-b border-slate-800 px-4 py-3 text-xs uppercase tracking-[0.22em] text-slate-400">
+            User Java Workbench
+          </div>
+          <div className="flex flex-wrap gap-2 border-b border-slate-800 bg-slate-950 px-4 py-3">
+            <Button size="sm" variant="secondary" onClick={loadAutonomousTemplate}>
+              Load Autonomous Template
+            </Button>
+            <Button size="sm" variant="secondary" onClick={loadTeleOpTemplate}>
+              Load TeleOp Template
+            </Button>
+          </div>
+          <div className="flex flex-wrap border-b border-slate-800 bg-slate-900/70">
+            {files.map((file) => (
+              <button
+                key={file.id}
+                onClick={() => setActiveFileId(file.id)}
+                className={`border-r border-slate-800 px-4 py-2 text-sm transition-colors ${
+                  activeFile?.id === file.id
+                    ? "bg-slate-950 text-white"
+                    : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                }`}
+              >
+                {file.name}
+              </button>
+            ))}
+          </div>
+          <div className="h-[420px]">
+            {activeFile ? (
+              <AceEditor
+                mode="java"
+                theme="monokai"
+                name="simulator-java-workbench"
+                value={activeFile.content}
+                onChange={handleFileChange}
+                width="100%"
+                height="100%"
+                setOptions={{
+                  enableBasicAutocompletion: true,
+                  enableLiveAutocompletion: true,
+                  enableSnippets: true,
+                  fontSize: 14,
+                  showPrintMargin: false,
+                  useWorker: false,
+                  wrap: true,
+                }}
+              />
+            ) : null}
+          </div>
+        </div>
+
+        {detectedOpModeType === "teleop" ? (
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <p className="mb-1 text-sm font-medium text-slate-100">Gamepad 1</p>
+                <p className="mb-0 text-xs text-slate-400">
+                  Logitech F310-style input mapped to real FTC `gamepad1` fields.
+                </p>
+              </div>
+              <Button size="sm" variant="outline" className="bg-slate-950 text-slate-100" onClick={clearGamepad}>
+                Clear Buttons
+              </Button>
+            </div>
+            <F310Gamepad
+              state={gamepadState}
+              onAxisChange={setGamepadAxisState}
+              onButtonChange={setGamepadButtonState}
+            />
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3 font-mono text-xs text-slate-300">
+                `left_stick_x`: {gamepadState.axes.left_stick_x.toFixed(2)}
+                <br />
+                `left_stick_y`: {gamepadState.axes.left_stick_y.toFixed(2)}
+                <br />
+                `right_stick_x`: {gamepadState.axes.right_stick_x.toFixed(2)}
+                <br />
+                `right_stick_y`: {gamepadState.axes.right_stick_y.toFixed(2)}
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3 font-mono text-xs text-slate-300">
+                `left_trigger`: {gamepadState.axes.left_trigger.toFixed(2)}
+                <br />
+                `right_trigger`: {gamepadState.axes.right_trigger.toFixed(2)}
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3 font-mono text-xs text-slate-300">
+                Buttons:{" "}
+                {Object.entries(gamepadState.buttons)
+                  .filter(([, value]) => value)
+                  .map(([key]) => key)
+                  .join(", ") || "none"}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="space-y-2 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 font-mono text-xs sm:text-sm">
+          {logEntries.map((entry) => (
+            <div
+              key={entry.id}
+              className={
+                entry.tone === "error"
+                  ? "text-rose-300"
+                  : entry.tone === "success"
+                    ? "text-emerald-300"
+                    : "text-slate-200"
+              }
+            >
+              {entry.message}
+            </div>
+          ))}
+        </div>
+
+        <p className="mb-0 text-xs text-slate-500">
+          Hidden runtime support provides FTC-style classes, opmode lifecycle handling, and gamepad
+          mapping while keeping the visible editor focused on robot-ready code.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
