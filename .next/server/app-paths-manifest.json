@@ -1,5 +1,5 @@
 {
+  "/simulator-test/page": "app/simulator-test/page.js",
   "/page": "app/page.js",
-  "/simulator-builder/page": "app/simulator-builder/page.js",
-  "/simulator-test/page": "app/simulator-test/page.js"
+  "/simulator-builder/page": "app/simulator-builder/page.js"
 }
