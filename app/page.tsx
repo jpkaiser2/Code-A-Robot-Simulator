@@ -54,6 +54,25 @@ export default function HomePage() {
               Write Java, use the controller, and test the robot in a focused three-pane runtime.
             </p>
           </Link>
+
+          <Link
+            href="/driver-station-test"
+            className="group rounded-[28px] border border-white/10 bg-[#050505] p-8 transition hover:border-white/20 hover:bg-[#090909]"
+          >
+            <div className="mb-8 flex items-start justify-between gap-4">
+              <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">
+                Driver Station
+              </div>
+              <div className="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-400 transition group-hover:text-white">
+                Open
+              </div>
+            </div>
+            <div className="mb-3 text-3xl font-semibold text-white">Preview The DS UI</div>
+            <p className="mb-0 max-w-md text-zinc-400">
+              Match the FTC driver station shell and controls on a dedicated page before wiring it
+              into the simulator.
+            </p>
+          </Link>
         </div>
 
         <div className="grid gap-4 border-t border-white/10 pt-8 text-sm text-zinc-500 md:grid-cols-3">
