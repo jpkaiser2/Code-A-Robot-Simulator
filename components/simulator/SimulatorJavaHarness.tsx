@@ -33,6 +33,13 @@ interface HarnessFile {
 
 type UserOpModeType = "teleop" | "autonomous";
 
+interface DetectedOpMode {
+  fileId: string;
+  className: string;
+  type: UserOpModeType;
+  fileName: string;
+}
+
 function createSupportFiles(): Array<{ name: string; content: string }> {
   return [
     {
@@ -518,18 +525,124 @@ function detectUserOpModeType(files: HarnessFile[]): UserOpModeType {
   return "autonomous";
 }
 
-function detectUserOpModeClassName(files: HarnessFile[]): string {
-  const primaryFile = files[0];
-  if (!primaryFile) {
-    return "org.firstinspires.ftc.teamcode.MechanismTestOpMode";
+function detectOpModes(files: HarnessFile[]): DetectedOpMode[] {
+  return files.reduce<DetectedOpMode[]>((opModes, file) => {
+    const packageMatch = file.content.match(/package\s+([a-zA-Z0-9_.]+)\s*;/);
+    const classMatch = file.content.match(/public\s+class\s+([A-Za-z0-9_]+)/);
+    const packageName = packageMatch?.[1] ?? "org.firstinspires.ftc.teamcode";
+    const className = classMatch?.[1];
+
+    if (!className) {
+      return opModes;
+    }
+
+    if (file.content.includes("@TeleOp")) {
+      opModes.push({
+        fileId: file.id,
+        fileName: file.name,
+        className: `${packageName}.${className}`,
+        type: "teleop" as const,
+      });
+      return opModes;
+    }
+
+    if (file.content.includes("@Autonomous")) {
+      opModes.push({
+        fileId: file.id,
+        fileName: file.name,
+        className: `${packageName}.${className}`,
+        type: "autonomous" as const,
+      });
+      return opModes;
+    }
+
+    if (file.content.includes("extends OpMode")) {
+      opModes.push({
+        fileId: file.id,
+        fileName: file.name,
+        className: `${packageName}.${className}`,
+        type: "teleop" as const,
+      });
+      return opModes;
+    }
+
+    if (file.content.includes("extends LinearOpMode")) {
+      opModes.push({
+        fileId: file.id,
+        fileName: file.name,
+        className: `${packageName}.${className}`,
+        type: "autonomous" as const,
+      });
+      return opModes;
+    }
+
+    return opModes;
+  }, []);
+}
+
+function addFilesWithoutReplacing(
+  currentFiles: HarnessFile[],
+  nextFiles: HarnessFile[]
+): { files: HarnessFile[]; addedFile: HarnessFile | null } {
+  const existingNames = new Set(currentFiles.map((file) => file.name));
+  const filesToAdd: HarnessFile[] = [];
+
+  for (let index = 0; index < nextFiles.length; index += 1) {
+    const file = nextFiles[index];
+    if (existingNames.has(file.name)) {
+      continue;
+    }
+
+    filesToAdd.push({
+      ...file,
+      id: `file-${Date.now()}-${index}-${file.name}`,
+    });
+    existingNames.add(file.name);
   }
 
-  const packageMatch = primaryFile.content.match(/package\s+([a-zA-Z0-9_.]+)\s*;/);
-  const classMatch = primaryFile.content.match(/public\s+class\s+([A-Za-z0-9_]+)/);
-  const packageName = packageMatch?.[1] ?? "org.firstinspires.ftc.teamcode";
-  const className = classMatch?.[1] ?? "MechanismTestOpMode";
+  return {
+    files: [...currentFiles, ...filesToAdd],
+    addedFile: filesToAdd[0] ?? null,
+  };
+}
 
-  return `${packageName}.${className}`;
+function createNewJavaFile(fileIndex: number): HarnessFile {
+  const className = `Helper${fileIndex}`;
+
+  return {
+    id: `file-${Date.now()}-${fileIndex}`,
+    name: `${className}.java`,
+    content: `package org.firstinspires.ftc.teamcode;
+
+public class ${className} {
+}
+`,
+  };
+}
+
+function getJavaBaseName(fileName: string): string {
+  return fileName.replace(/\.java$/i, "");
+}
+
+function normalizeJavaFileName(fileName: string): string {
+  const trimmedName = fileName.trim();
+  const withoutExtension = trimmedName.replace(/\.java$/i, "");
+  const sanitizedBaseName =
+    withoutExtension.replace(/[^A-Za-z0-9_]/g, "") || "Untitled";
+
+  return `${sanitizedBaseName}.java`;
+}
+
+function renameJavaClassIfNeeded(content: string, previousFileName: string, nextFileName: string) {
+  const previousClassName = getJavaBaseName(previousFileName);
+  const nextClassName = getJavaBaseName(nextFileName);
+  const classPattern = new RegExp(`(public\\s+class\\s+)${previousClassName}(\\b)`);
+
+  if (!classPattern.test(content)) {
+    return content;
+  }
+
+  return content.replace(classPattern, `$1${nextClassName}$2`);
 }
 
 const HARNESS_HTML = `<!DOCTYPE html>
@@ -909,22 +1022,39 @@ export default function SimulatorJavaHarness({
   onEditorResizeStart,
   gamepadState,
 }: SimulatorJavaHarnessProps) {
+  const editorRef = useRef<any>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [status, setStatus] = useState<HarnessStatus>("loading");
   const [awaitingStart, setAwaitingStart] = useState(false);
   const [pendingRun, setPendingRun] = useState(false);
   const [files, setFiles] = useState<HarnessFile[]>(() => createAutonomousTemplate());
   const [activeFileId, setActiveFileId] = useState("1");
+  const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [selectedRunClassName, setSelectedRunClassName] = useState<string | null>(null);
+  const [runtimeKey, setRuntimeKey] = useState(0);
+  const [editorWidth, setEditorWidth] = useState(500);
+  const [isDirty, setIsDirty] = useState<Record<string, boolean>>({});
   const [logEntries, setLogEntries] = useState<HarnessLogEntry[]>([
     { id: 1, tone: "default", message: "Preparing runtime..." },
   ]);
+  const isDragging = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartWidth = useRef(0);
 
   const activeFile = useMemo(
     () => files.find((file) => file.id === activeFileId) ?? files[0],
     [activeFileId, files]
   );
+  const detectedOpModes = useMemo(() => detectOpModes(files), [files]);
   const detectedOpModeType = useMemo(() => detectUserOpModeType(files), [files]);
-  const detectedOpModeClassName = useMemo(() => detectUserOpModeClassName(files), [files]);
+  const selectedOpMode = useMemo(
+    () =>
+      detectedOpModes.find((opMode) => opMode.className === selectedRunClassName) ??
+      detectedOpModes[0] ??
+      null,
+    [detectedOpModes, selectedRunClassName]
+  );
 
   const appendLog = useCallback((message: string, tone: HarnessLogEntry["tone"] = "default") => {
     setLogEntries((previousEntries) => [
@@ -936,6 +1066,18 @@ export default function SimulatorJavaHarness({
       },
     ].slice(-10));
   }, []);
+
+  const clearConsole = useCallback(() => {
+    setLogEntries([]);
+  }, []);
+
+  const refreshRuntime = useCallback(() => {
+    setStatus("loading");
+    setAwaitingStart(false);
+    setPendingRun(false);
+    setRuntimeKey((previousValue) => previousValue + 1);
+    appendLog("Refreshing runtime...");
+  }, [appendLog]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -1054,9 +1196,32 @@ export default function SimulatorJavaHarness({
     };
   }, [appendLog, bridge, gamepadState]);
 
+  useEffect(() => {
+    if (detectedOpModes.length === 0) {
+      if (selectedRunClassName !== null) {
+        setSelectedRunClassName(null);
+      }
+      return;
+    }
+
+    if (
+      selectedRunClassName &&
+      detectedOpModes.some((opMode) => opMode.className === selectedRunClassName)
+    ) {
+      return;
+    }
+
+    setSelectedRunClassName(detectedOpModes[0].className);
+  }, [detectedOpModes, selectedRunClassName]);
+
   const postRunDemo = useCallback(() => {
     if (!iframeRef.current?.contentWindow) {
       appendLog("Harness iframe is not ready yet.", "error");
+      return;
+    }
+
+    if (!selectedOpMode) {
+      appendLog("No runnable TeleOp or Autonomous class found.", "error");
       return;
     }
 
@@ -1064,7 +1229,7 @@ export default function SimulatorJavaHarness({
     setAwaitingStart(false);
     setPendingRun(false);
     bridge.reset();
-    appendLog("Compiling and starting your code...");
+    appendLog(`Compiling and starting ${selectedOpMode.fileName}...`);
     iframeRef.current.contentWindow.postMessage(
       {
         type: "sim-java-run-demo",
@@ -1072,11 +1237,11 @@ export default function SimulatorJavaHarness({
           ...createSupportFiles(),
           ...files.map(({ name, content }) => ({ name, content })),
         ],
-        mainClassName: detectedOpModeClassName,
+        mainClassName: selectedOpMode.className,
       },
       "*"
     );
-  }, [appendLog, bridge, detectedOpModeClassName, files]);
+  }, [appendLog, bridge, files, selectedOpMode]);
 
   const runDemo = useCallback(() => {
     if (status === "loading") {
@@ -1131,31 +1296,191 @@ export default function SimulatorJavaHarness({
     );
   }, [appendLog]);
 
-  const resetFiles = useCallback(() => {
-    setFiles(createAutonomousTemplate());
-    setActiveFileId("1");
-    appendLog("Code reset.", "success");
-  }, [appendLog]);
-
   const loadTeleOpTemplate = useCallback(() => {
-    setFiles(createTeleOpTemplate());
-    setActiveFileId("1");
-    appendLog("TeleOp template loaded.", "success");
-  }, [appendLog]);
+    const result = addFilesWithoutReplacing(files, createTeleOpTemplate());
+    setFiles(result.files);
+
+    if (result.addedFile) {
+      setActiveFileId(result.addedFile.id);
+      setSelectedRunClassName(detectOpModes([result.addedFile])[0]?.className ?? null);
+      appendLog("TeleOp template opened in a new tab.", "success");
+      return;
+    }
+
+    appendLog("TeleOp template is already open.", "default");
+  }, [appendLog, files]);
 
   const loadAutonomousTemplate = useCallback(() => {
-    setFiles(createAutonomousTemplate());
-    setActiveFileId("1");
-    appendLog("Autonomous template loaded.", "success");
-  }, [appendLog]);
+    const result = addFilesWithoutReplacing(files, createAutonomousTemplate());
+    setFiles(result.files);
+
+    if (result.addedFile) {
+      setActiveFileId(result.addedFile.id);
+      setSelectedRunClassName(detectOpModes([result.addedFile])[0]?.className ?? null);
+      appendLog("Autonomous template opened in a new tab.", "success");
+      return;
+    }
+
+    appendLog("Autonomous template is already open.", "default");
+  }, [appendLog, files]);
 
   const handleFileChange = useCallback((nextContent: string) => {
+    setIsDirty((previousDirty) => ({
+      ...previousDirty,
+      [activeFileId]: true,
+    }));
     setFiles((previousFiles) =>
       previousFiles.map((file) =>
         file.id === activeFileId ? { ...file, content: nextContent } : file
       )
     );
   }, [activeFileId]);
+
+  const addFile = useCallback(() => {
+    const nextFile = createNewJavaFile(files.length + 1);
+    setFiles((previousFiles) => [...previousFiles, nextFile]);
+    setActiveFileId(nextFile.id);
+    setIsDirty((previousDirty) => ({
+      ...previousDirty,
+      [nextFile.id]: true,
+    }));
+    appendLog(`Added ${nextFile.name}.`, "success");
+  }, [appendLog, files.length]);
+
+  const removeFile = useCallback((fileId: string) => {
+    if (files.length <= 1) {
+      appendLog("At least one file is required.", "error");
+      return;
+    }
+
+    const fileToRemove = files.find((file) => file.id === fileId);
+    if (!fileToRemove) {
+      return;
+    }
+
+    const remainingFiles = files.filter((file) => file.id !== fileId);
+    setFiles(remainingFiles);
+    setIsDirty((previousDirty) => {
+      const nextDirty = { ...previousDirty };
+      delete nextDirty[fileId];
+      return nextDirty;
+    });
+
+    if (activeFileId === fileId) {
+      setActiveFileId(remainingFiles[0]?.id ?? "");
+    }
+
+    appendLog(`Removed ${fileToRemove.name}.`, "success");
+  }, [activeFileId, appendLog, files]);
+
+  const startRenamingFile = useCallback((fileId: string) => {
+    const fileToRename = files.find((file) => file.id === fileId);
+    if (!fileToRename) {
+      return;
+    }
+
+    setRenamingFileId(fileId);
+    setRenameDraft(fileToRename.name);
+  }, [files]);
+
+  const cancelRenamingFile = useCallback(() => {
+    setRenamingFileId(null);
+    setRenameDraft("");
+  }, []);
+
+  const commitRenameFile = useCallback((fileId: string) => {
+    const fileToRename = files.find((file) => file.id === fileId);
+    if (!fileToRename) {
+      cancelRenamingFile();
+      return;
+    }
+
+    const nextFileName = normalizeJavaFileName(renameDraft);
+    const nameTaken = files.some(
+      (file) => file.id !== fileId && file.name.toLowerCase() === nextFileName.toLowerCase()
+    );
+
+    if (nameTaken) {
+      appendLog(`${nextFileName} is already open.`, "error");
+      return;
+    }
+
+    setFiles((previousFiles) =>
+      previousFiles.map((file) =>
+        file.id === fileId
+          ? {
+              ...file,
+              name: nextFileName,
+              content: renameJavaClassIfNeeded(file.content, file.name, nextFileName),
+            }
+          : file
+      )
+    );
+    setIsDirty((previousDirty) => ({
+      ...previousDirty,
+      [fileId]: true,
+    }));
+    setRenamingFileId(null);
+    setRenameDraft("");
+    appendLog(`Renamed ${fileToRename.name} to ${nextFileName}.`, "success");
+  }, [appendLog, cancelRenamingFile, files, renameDraft]);
+
+  const handleMouseMove = useCallback((event: MouseEvent) => {
+    if (!isDragging.current) {
+      return;
+    }
+
+    const nextWidth = dragStartWidth.current + (event.clientX - dragStartX.current);
+    const minWidth = 300;
+    const maxWidth = window.innerWidth - 400;
+    setEditorWidth(Math.min(maxWidth, Math.max(minWidth, nextWidth)));
+  }, []);
+
+  const handleMouseUp = useCallback(() => {
+    isDragging.current = false;
+    document.removeEventListener("mousemove", handleMouseMove);
+    document.removeEventListener("mouseup", handleMouseUp);
+  }, [handleMouseMove]);
+
+  const handleMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    isDragging.current = true;
+    dragStartX.current = event.clientX;
+    dragStartWidth.current = editorWidth;
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  }, [editorWidth, handleMouseMove, handleMouseUp]);
+
+  useEffect(() => {
+    if (!editorRef.current?.editor) {
+      return;
+    }
+
+    editorRef.current.editor.setOptions({
+      enableBasicAutocompletion: true,
+      enableLiveAutocompletion: true,
+      enableSnippets: true,
+      showLineNumbers: true,
+      showGutter: true,
+      fontSize: 14,
+      tabSize: 2,
+      highlightActiveLine: true,
+      highlightGutterLine: true,
+      showPrintMargin: false,
+      scrollPastEnd: 0.5,
+      useSoftTabs: true,
+      useWorker: false,
+      wrap: true,
+      wrapMethod: "text",
+      indentedSoftWrap: true,
+    });
+  }, [activeFileId]);
+
+  useEffect(() => {
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [handleMouseMove, handleMouseUp]);
 
   const statusLabel = useMemo(() => {
     switch (status) {
@@ -1171,71 +1496,31 @@ export default function SimulatorJavaHarness({
   }, [awaitingStart, status]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-black text-white">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-4 sm:px-6">
-        <div className="flex items-center gap-2">
-          <div
-            className={`h-2.5 w-2.5 rounded-full ${
-              status === "running"
-                ? "bg-emerald-400"
-                : status === "error"
-                  ? "bg-rose-400"
-                  : "bg-zinc-500"
-            }`}
-          />
-          <span className="text-sm text-zinc-300">{statusLabel}</span>
+    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-none bg-[#1E1E1E] text-white">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-700 bg-[#1e1f1c] px-4 py-2">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="text-sm text-gray-400">JAVA</div>
+          {isDirty[activeFileId] ? (
+            <div className="text-sm text-yellow-400">• Modified</div>
+          ) : null}
           <span className="rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] uppercase tracking-[0.2em] text-zinc-500">
-            {detectedOpModeType === "teleop" ? "TeleOp" : "Auto"}
+            {selectedOpMode?.type === "teleop"
+              ? "TeleOp"
+              : selectedOpMode?.type === "autonomous"
+                ? "Auto"
+                : detectedOpModeType === "teleop"
+                  ? "TeleOp"
+                  : "Auto"}
           </span>
+          <span className="text-sm text-zinc-500">{statusLabel}</span>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Button
-            onClick={runDemo}
-            disabled={status === "running"}
-            className="border border-white/10 bg-white text-black hover:bg-zinc-200"
-          >
-            Run Code
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={startOpMode}
-            disabled={!awaitingStart}
-            className="bg-zinc-900 text-white hover:bg-zinc-800"
-          >
-            Start
-          </Button>
-          <Button
-            variant="outline"
-            onClick={stopOpMode}
-            className="border-white/10 bg-transparent text-zinc-100 hover:bg-zinc-900"
-          >
-            Stop
-          </Button>
-          <Button
-            variant="outline"
-            onClick={resetFiles}
-            className="border-white/10 bg-transparent text-zinc-100 hover:bg-zinc-900"
-          >
-            Reset
-          </Button>
-        </div>
-      </div>
-
-      <iframe
-        ref={iframeRef}
-        srcDoc={HARNESS_HTML}
-        title="Simulator Runtime"
-        className="pointer-events-none absolute h-0 w-0 opacity-0"
-      />
-
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-3 sm:px-6">
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
             variant="secondary"
             onClick={loadAutonomousTemplate}
-            className="bg-zinc-900 text-white hover:bg-zinc-800"
+            className="bg-zinc-800 text-white hover:bg-zinc-700"
           >
             Autonomous
           </Button>
@@ -1243,34 +1528,143 @@ export default function SimulatorJavaHarness({
             size="sm"
             variant="secondary"
             onClick={loadTeleOpTemplate}
-            className="bg-zinc-900 text-white hover:bg-zinc-800"
+            className="bg-zinc-800 text-white hover:bg-zinc-700"
           >
             TeleOp
           </Button>
+          <Button
+            onClick={runDemo}
+            disabled={status === "running"}
+            className="bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-600"
+          >
+            {status === "running" ? "Running..." : "Run Code"}
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={startOpMode}
+            disabled={!awaitingStart}
+            className="bg-zinc-800 text-white hover:bg-zinc-700 disabled:bg-zinc-900 disabled:text-zinc-500"
+          >
+            Start
+          </Button>
+          <Button
+            variant="outline"
+            onClick={stopOpMode}
+            className="border-gray-700 bg-transparent text-zinc-100 hover:bg-zinc-800"
+          >
+            Stop
+          </Button>
+          <Button
+            variant="outline"
+            onClick={addFile}
+            className="border-gray-700 bg-transparent text-zinc-100 hover:bg-zinc-800"
+          >
+            New File
+          </Button>
+          {status !== "ready" ? (
+            <Button
+              variant="outline"
+              onClick={refreshRuntime}
+              className="border-gray-700 bg-transparent text-zinc-100 hover:bg-zinc-800"
+              title="Refresh the editor runtime"
+            >
+              Refresh editor
+            </Button>
+          ) : null}
         </div>
-        <div className="text-xs text-zinc-500">Code</div>
       </div>
 
+      <iframe
+        key={runtimeKey}
+        ref={iframeRef}
+        srcDoc={HARNESS_HTML}
+        title="Simulator Runtime"
+        className="pointer-events-none absolute h-0 w-0 opacity-0"
+      />
+
+      {detectedOpModes.length > 1 ? (
+        <div className="flex items-center justify-between gap-3 border-b border-gray-700 bg-[#161714] px-4 py-2">
+          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Run Target</div>
+          <select
+            value={selectedOpMode?.className ?? ""}
+            onChange={(event) => setSelectedRunClassName(event.target.value)}
+            className="rounded border border-gray-700 bg-[#1e1f1c] px-3 py-1.5 text-sm text-zinc-100 outline-none"
+          >
+            {detectedOpModes.map((opMode) => (
+              <option key={opMode.className} value={opMode.className}>
+                {opMode.type === "teleop" ? "TeleOp" : "Autonomous"}: {opMode.fileName}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex flex-wrap border-b border-white/10 bg-[#050505]">
+        <div className="flex flex-wrap border-b border-gray-700 bg-[#1e1f1c]">
           {files.map((file) => (
-            <button
+            <div
               key={file.id}
-              onClick={() => setActiveFileId(file.id)}
-              className={`border-r border-white/10 px-4 py-2.5 text-sm transition-colors ${
+              className={`flex items-center border-r border-gray-700 text-sm ${
                 activeFile?.id === file.id
-                  ? "bg-black text-white"
-                  : "text-zinc-500 hover:bg-zinc-950 hover:text-zinc-200"
+                  ? "bg-[#272822] text-white"
+                  : "text-gray-400 hover:bg-[#2d2e28] hover:text-white"
               }`}
             >
-              {file.name}
-            </button>
+              {renamingFileId === file.id ? (
+                <input
+                  value={renameDraft}
+                  onChange={(event) => setRenameDraft(event.target.value)}
+                  onBlur={() => commitRenameFile(file.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      commitRenameFile(file.id);
+                    }
+
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      cancelRenamingFile();
+                    }
+                  }}
+                  autoFocus
+                  className="min-w-[180px] bg-transparent px-4 py-2 text-white outline-none"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setActiveFileId(file.id)}
+                  onDoubleClick={() => startRenamingFile(file.id)}
+                  className="flex items-center gap-2 px-4 py-2"
+                  title="Double-click to rename"
+                >
+                  <span>{file.name}</span>
+                  {isDirty[file.id] ? <span className="text-yellow-400">•</span> : null}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => removeFile(file.id)}
+                className="px-2 py-2 text-xs text-gray-500 transition-colors hover:text-white"
+                aria-label={`Close ${file.name}`}
+                title={`Close ${file.name}`}
+              >
+                x
+              </button>
+            </div>
           ))}
+          <button
+            type="button"
+            onClick={addFile}
+            className="px-4 py-2 text-sm text-gray-400 transition-colors hover:bg-[#2d2e28] hover:text-white"
+          >
+            + New File
+          </button>
         </div>
 
-        <div className="min-h-[320px]" style={{ height: `${editorHeight}px` }}>
+        <div className="relative min-h-[320px] flex-1" style={{ height: `${editorHeight}px` }}>
           {activeFile ? (
             <AceEditor
+              ref={editorRef}
               mode="java"
               theme="monokai"
               name="simulator-java-workbench"
@@ -1282,13 +1676,73 @@ export default function SimulatorJavaHarness({
                 enableBasicAutocompletion: true,
                 enableLiveAutocompletion: true,
                 enableSnippets: true,
+                showLineNumbers: true,
+                showGutter: true,
                 fontSize: 14,
+                tabSize: 2,
+                highlightActiveLine: true,
+                highlightGutterLine: true,
                 showPrintMargin: false,
+                useSoftTabs: true,
                 useWorker: false,
                 wrap: true,
+                wrapMethod: "text",
+                indentedSoftWrap: true,
               }}
             />
           ) : null}
+        </div>
+
+        <div className="border-t border-gray-700">
+          <div className="flex items-center justify-between border-b border-gray-700 bg-[#1e1f1c] px-4 py-2">
+            <div className="text-sm text-gray-300">Console</div>
+            <div className="flex items-center gap-2">
+              {status === "running" ? (
+                <div className="flex items-center gap-2">
+                  <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-blue-500" />
+                  <span className="text-sm text-gray-400">Running...</span>
+                </div>
+              ) : null}
+              <button
+                type="button"
+                onClick={clearConsole}
+                className="rounded px-2 py-1 text-xs text-gray-500 transition-colors hover:bg-gray-700 hover:text-gray-300"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+
+          <div className="h-28 overflow-auto bg-[#272822] p-4 font-mono text-sm whitespace-pre-wrap">
+            {logEntries.length === 0 ? (
+              <div className="text-zinc-500">Console cleared.</div>
+            ) : (
+              <div className="space-y-2">
+                {logEntries.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className={
+                      entry.tone === "error"
+                        ? "text-rose-300"
+                        : entry.tone === "success"
+                          ? "text-emerald-300"
+                          : "text-green-400"
+                    }
+                  >
+                    {entry.message}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between border-t border-gray-700 bg-[#1e1f1c] px-4 py-1 text-xs text-gray-400">
+          <div className="flex items-center gap-4">
+            <div>UTF-8</div>
+            <div>JAVA</div>
+          </div>
+          <div>{activeFile?.name ?? "No file selected"}</div>
         </div>
 
         <div
@@ -1298,31 +1752,6 @@ export default function SimulatorJavaHarness({
           className="group flex h-4 cursor-row-resize items-center justify-center border-t border-white/10 bg-black"
         >
           <div className="h-1 w-14 rounded-full bg-zinc-800 transition-colors group-hover:bg-zinc-600" />
-        </div>
-
-        <div className="border-t border-white/10 px-5 py-4 sm:px-6">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="mb-0 text-sm font-medium text-white">Console</p>
-            <p className="mb-0 text-xs text-zinc-500">Latest output</p>
-          </div>
-          <div className="h-40 overflow-y-auto rounded-2xl border border-white/10 bg-[#050505] p-4 font-mono text-xs sm:text-sm">
-            <div className="space-y-2">
-              {logEntries.map((entry) => (
-                <div
-                  key={entry.id}
-                  className={
-                    entry.tone === "error"
-                      ? "text-rose-300"
-                      : entry.tone === "success"
-                        ? "text-emerald-300"
-                        : "text-zinc-300"
-                  }
-                >
-                  {entry.message}
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </div>
