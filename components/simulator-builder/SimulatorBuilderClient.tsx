@@ -183,8 +183,8 @@ function LibraryCard({
       }}
       className={`group w-full rounded-2xl border p-4 text-left transition ${
         isDragging
-          ? "border-cyan-400 bg-cyan-500/10 opacity-70"
-          : "border-slate-800 bg-slate-950/70 hover:border-cyan-500/40 hover:bg-slate-900"
+          ? "border-white/30 bg-white/[0.06] opacity-70"
+          : "border-white/10 bg-black hover:border-white/20 hover:bg-[#090909]"
       }`}
       {...listeners}
       {...attributes}
@@ -193,7 +193,7 @@ function LibraryCard({
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <div className="font-medium text-white">{component.displayName}</div>
-          <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
             {component.category}
           </div>
         </div>
@@ -202,8 +202,8 @@ function LibraryCard({
           style={{ backgroundColor: component.color }}
         />
       </div>
-      <p className="mb-3 text-sm text-slate-400">{component.description}</p>
-      <div className="flex items-center justify-between text-xs text-slate-500">
+      <p className="mb-3 text-sm text-zinc-400">{component.description}</p>
+      <div className="flex items-center justify-between text-xs text-zinc-500">
         <span>{component.assetSource === "custom" ? "Custom" : "Built-in"}</span>
         <span>Double-click to add</span>
       </div>
@@ -246,10 +246,10 @@ function AssemblyCard({
       }}
       className={`rounded-2xl border p-4 transition ${
         isSelected
-          ? "border-orange-400 bg-orange-500/10"
-          : "border-slate-800 bg-slate-950/70"
+          ? "border-white/25 bg-white/[0.05]"
+          : "border-white/10 bg-black"
       } ${draggable.isDragging ? "opacity-60" : ""} ${
-        droppable.isOver ? "ring-2 ring-cyan-400/60" : ""
+        droppable.isOver ? "ring-2 ring-white/30" : ""
       }`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -265,13 +265,13 @@ function AssemblyCard({
             />
             <span className="truncate font-medium text-white">{instance.displayName}</span>
           </div>
-          <div className="text-sm text-slate-400">{component?.simulatorRole ?? "unknown role"}</div>
-          <div className="mt-2 font-mono text-xs text-cyan-200">{instance.deviceName}</div>
+          <div className="text-sm text-zinc-400">{component?.simulatorRole ?? "unknown role"}</div>
+          <div className="mt-2 font-mono text-xs text-zinc-200">{instance.deviceName}</div>
         </button>
         <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
-            className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-cyan-500/50 hover:text-white"
+            className="rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-300 hover:border-white/20 hover:text-white"
             {...draggable.listeners}
             {...draggable.attributes}
           >
@@ -279,7 +279,7 @@ function AssemblyCard({
           </button>
           <button
             type="button"
-            className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-rose-500/50 hover:text-white"
+            className="rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-300 hover:border-white/20 hover:text-white"
             onClick={onRemove}
           >
             Remove
@@ -312,20 +312,20 @@ function AssemblyCanvas({
       ref={setNodeRef}
       className={`min-h-[520px] rounded-[28px] border p-4 transition ${
         isOver
-          ? "border-cyan-400 bg-cyan-500/5"
-          : "border-slate-800 bg-slate-950/70"
+          ? "border-white/25 bg-white/[0.03]"
+          : "border-white/10 bg-[#050505]"
       }`}
     >
       <div className="mb-4 flex items-center justify-between gap-4">
         <div>
-          <div className="text-sm uppercase tracking-[0.24em] text-slate-500">
+          <div className="text-sm uppercase tracking-[0.24em] text-zinc-500">
             Assembly Canvas
           </div>
-          <div className="text-sm text-slate-400">
+          <div className="text-sm text-zinc-400">
             Drag from the library or reorder existing parts to shape the robot lesson.
           </div>
         </div>
-        <div className="rounded-full border border-slate-800 px-3 py-1 text-xs text-slate-400">
+        <div className="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-400">
           {assembly.length} part{assembly.length === 1 ? "" : "s"}
         </div>
       </div>
@@ -344,7 +344,7 @@ function AssemblyCanvas({
           ))}
         </div>
       ) : (
-        <div className="flex min-h-[420px] items-center justify-center rounded-[22px] border border-dashed border-slate-800 bg-slate-900/40 px-8 text-center text-slate-500">
+        <div className="flex min-h-[420px] items-center justify-center rounded-[22px] border border-dashed border-white/10 bg-black px-8 text-center text-zinc-500">
           Drag a chassis, motors, or mechanisms here to start building a lesson robot.
         </div>
       )}
@@ -504,37 +504,37 @@ export default function SimulatorBuilderClient() {
   };
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(249,115,22,0.18),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(14,165,233,0.16),_transparent_24%),linear-gradient(180deg,_#09090b,_#111827_55%,_#020617)] px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-        <div className="rounded-[32px] border border-white/10 bg-black/20 p-6 shadow-[0_40px_120px_rgba(2,6,23,0.65)] backdrop-blur">
+    <div className="min-h-screen bg-black px-5 py-8 sm:px-6 lg:px-8">
+      <div className="flex w-full flex-col gap-6">
+        <div className="rounded-[32px] border border-white/10 bg-[#050505] p-6 shadow-[0_30px_80px_rgba(0,0,0,0.35)]">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div className="max-w-3xl">
-              <p className="mb-3 text-sm uppercase tracking-[0.34em] text-orange-300/80">
-                Teacher Builder
+              <p className="mb-3 text-[11px] uppercase tracking-[0.34em] text-zinc-500">
+                Builder
               </p>
               <h1 className="mb-3 text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-                Build lesson-ready robots from a reusable component library
+                Build lesson-ready robots in a cleaner workspace
               </h1>
-              <p className="mb-0 max-w-2xl text-base text-slate-300 sm:text-lg">
-                This interface is separate from the simulator MVP. Use it to assemble preconfigured
-                robots, import custom components, and generate JSON drafts for future lesson pages.
+              <p className="mb-0 max-w-2xl text-base text-zinc-400 sm:text-lg">
+                Assemble parts, configure device names, import custom components, and generate the
+                lesson draft JSON your simulator can consume.
               </p>
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-orange-400/20 bg-orange-500/10 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.24em] text-orange-200/70">
+              <div className="rounded-2xl border border-white/10 bg-black px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.24em] text-zinc-500">
                   Library
                 </div>
                 <div className="text-2xl font-semibold text-white">{library.length}</div>
               </div>
-              <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.24em] text-cyan-200/70">
+              <div className="rounded-2xl border border-white/10 bg-black px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.24em] text-zinc-500">
                   Assembly
                 </div>
                 <div className="text-2xl font-semibold text-white">{assembly.length}</div>
               </div>
-              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.24em] text-emerald-200/70">
+              <div className="rounded-2xl border border-white/10 bg-black px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.24em] text-zinc-500">
                   Draft Id
                 </div>
                 <div className="truncate text-sm font-medium text-white">{lessonDraft.id}</div>
@@ -544,36 +544,36 @@ export default function SimulatorBuilderClient() {
         </div>
 
         <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1.15fr)_380px]">
-          <Card className="border-slate-800/90 bg-slate-950/80 text-slate-100 shadow-none">
+          <Card className="border-white/10 bg-[#050505] text-zinc-100 shadow-none">
             <CardHeader>
               <CardTitle className="text-xl text-white">Lesson Setup</CardTitle>
-              <CardDescription className="text-slate-400">
+              <CardDescription className="text-zinc-500">
                 Title, objective, and starter code that will ship with the saved robot draft.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm text-slate-300">Lesson title</label>
+                <label className="text-sm text-zinc-300">Lesson title</label>
                 <Input
                   value={lessonTitle}
                   onChange={(event) => setLessonTitle(event.target.value)}
-                  className="border-slate-800 bg-slate-900 text-slate-100"
+                  className="border-white/10 bg-black text-zinc-100"
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm text-slate-300">Objective</label>
+                <label className="text-sm text-zinc-300">Objective</label>
                 <Textarea
                   value={objective}
                   onChange={(event) => setObjective(event.target.value)}
-                  className="min-h-[110px] border-slate-800 bg-slate-900 text-slate-100"
+                  className="min-h-[110px] border-white/10 bg-black text-zinc-100"
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm text-slate-300">Starter Java</label>
+                <label className="text-sm text-zinc-300">Starter Java</label>
                 <Textarea
                   value={starterCode}
                   onChange={(event) => setStarterCode(event.target.value)}
-                  className="min-h-[220px] border-slate-800 bg-slate-900 font-mono text-xs text-slate-100"
+                  className="min-h-[220px] border-white/10 bg-black font-mono text-xs text-zinc-100"
                 />
               </div>
             </CardContent>
@@ -585,12 +585,12 @@ export default function SimulatorBuilderClient() {
             onDragEnd={handleDragEnd}
           >
             <div className="flex flex-col gap-6">
-              <Card className="border-slate-800/90 bg-slate-950/80 text-slate-100 shadow-none">
+              <Card className="border-white/10 bg-[#050505] text-zinc-100 shadow-none">
                 <CardHeader className="pb-4">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                     <div>
                       <CardTitle className="text-xl text-white">Component Library</CardTitle>
-                      <CardDescription className="text-slate-400">
+                      <CardDescription className="text-zinc-500">
                         Drag parts into the robot assembly or double-click to add instantly.
                       </CardDescription>
                     </div>
@@ -602,8 +602,8 @@ export default function SimulatorBuilderClient() {
                           onClick={() => setCategoryFilter(option)}
                           className={`rounded-full border px-3 py-1.5 text-xs uppercase tracking-[0.18em] transition ${
                             categoryFilter === option
-                              ? "border-orange-400 bg-orange-500/10 text-orange-100"
-                              : "border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                              ? "border-white/20 bg-white text-black"
+                              : "border-white/10 bg-black text-zinc-500 hover:border-white/20 hover:text-zinc-200"
                           }`}
                         >
                           {option}
@@ -636,10 +636,10 @@ export default function SimulatorBuilderClient() {
           </DndContext>
 
           <div className="flex flex-col gap-6">
-            <Card className="border-slate-800/90 bg-slate-950/80 text-slate-100 shadow-none">
+            <Card className="border-white/10 bg-[#050505] text-zinc-100 shadow-none">
               <CardHeader>
                 <CardTitle className="text-xl text-white">Inspector</CardTitle>
-                <CardDescription className="text-slate-400">
+                <CardDescription className="text-zinc-500">
                   Tune the selected part and assign the device names your students will code
                   against.
                 </CardDescription>
@@ -648,24 +648,20 @@ export default function SimulatorBuilderClient() {
                 {selectedInstance && selectedComponent ? (
                   <>
                     <div
-                      className="rounded-2xl border border-slate-800 p-4"
-                      style={{
-                        background:
-                          `linear-gradient(135deg, ${selectedInstance.colorOverride ?? selectedComponent.color}22, rgba(15,23,42,0.7))`,
-                      }}
+                      className="rounded-2xl border border-white/10 bg-black p-4"
                     >
-                      <div className="text-xs uppercase tracking-[0.22em] text-slate-400">
+                      <div className="text-xs uppercase tracking-[0.22em] text-zinc-500">
                         Selected Component
                       </div>
                       <div className="mt-2 text-xl font-medium text-white">
                         {selectedComponent.displayName}
                       </div>
-                      <div className="mt-1 text-sm text-slate-300">
+                      <div className="mt-1 text-sm text-zinc-400">
                         {selectedComponent.description}
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm text-slate-300">Display name</label>
+                      <label className="text-sm text-zinc-300">Display name</label>
                       <Input
                         value={selectedInstance.displayName}
                         onChange={(event) =>
@@ -674,11 +670,11 @@ export default function SimulatorBuilderClient() {
                             displayName: event.target.value,
                           }))
                         }
-                        className="border-slate-800 bg-slate-900 text-slate-100"
+                        className="border-white/10 bg-black text-zinc-100"
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm text-slate-300">Device name</label>
+                      <label className="text-sm text-zinc-300">Device name</label>
                       <Input
                         value={selectedInstance.deviceName}
                         onChange={(event) =>
@@ -687,11 +683,11 @@ export default function SimulatorBuilderClient() {
                             deviceName: event.target.value,
                           }))
                         }
-                        className="border-slate-800 bg-slate-900 font-mono text-slate-100"
+                        className="border-white/10 bg-black font-mono text-zinc-100"
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm text-slate-300">Attachment target</label>
+                      <label className="text-sm text-zinc-300">Attachment target</label>
                       <select
                         value={selectedInstance.attachmentTargetId ?? ""}
                         onChange={(event) =>
@@ -700,7 +696,7 @@ export default function SimulatorBuilderClient() {
                             attachmentTargetId: event.target.value || null,
                           }))
                         }
-                        className="flex h-10 w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+                        className="flex h-10 w-full rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-zinc-100"
                       >
                         <option value="">No attachment</option>
                         {assembly
@@ -713,7 +709,7 @@ export default function SimulatorBuilderClient() {
                       </select>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm text-slate-300">Preferred attachment point</label>
+                      <label className="text-sm text-zinc-300">Preferred attachment point</label>
                       <select
                         value={selectedInstance.attachmentPoint ?? ""}
                         onChange={(event) =>
@@ -722,7 +718,7 @@ export default function SimulatorBuilderClient() {
                             attachmentPoint: event.target.value || null,
                           }))
                         }
-                        className="flex h-10 w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+                        className="flex h-10 w-full rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-zinc-100"
                       >
                         {selectedComponent.attachmentPoints.map((point) => (
                           <option key={point} value={point}>
@@ -732,7 +728,7 @@ export default function SimulatorBuilderClient() {
                       </select>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm text-slate-300">Teacher notes</label>
+                      <label className="text-sm text-zinc-300">Teacher notes</label>
                       <Textarea
                         value={selectedInstance.notes}
                         onChange={(event) =>
@@ -741,12 +737,12 @@ export default function SimulatorBuilderClient() {
                             notes: event.target.value,
                           }))
                         }
-                        className="min-h-[100px] border-slate-800 bg-slate-900 text-slate-100"
+                        className="min-h-[100px] border-white/10 bg-black text-zinc-100"
                       />
                     </div>
                   </>
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-8 text-center text-slate-500">
+                  <div className="rounded-2xl border border-dashed border-white/10 bg-black p-8 text-center text-zinc-500">
                     Select a part from the assembly canvas to edit device names, attachments, and
                     teacher notes.
                   </div>
@@ -754,10 +750,10 @@ export default function SimulatorBuilderClient() {
               </CardContent>
             </Card>
 
-            <Card className="border-slate-800/90 bg-slate-950/80 text-slate-100 shadow-none">
+            <Card className="border-white/10 bg-[#050505] text-zinc-100 shadow-none">
               <CardHeader>
                 <CardTitle className="text-xl text-white">Import Custom Components</CardTitle>
-                <CardDescription className="text-slate-400">
+                <CardDescription className="text-zinc-500">
                   Paste one component object or an array of component definitions to extend the
                   teacher library.
                 </CardDescription>
@@ -767,23 +763,23 @@ export default function SimulatorBuilderClient() {
                   value={importText}
                   onChange={(event) => setImportText(event.target.value)}
                   placeholder='{"id":"custom-claw","displayName":"Custom Claw","category":"mechanism","simulatorRole":"claw"}'
-                  className="min-h-[160px] border-slate-800 bg-slate-900 font-mono text-xs text-slate-100"
+                  className="min-h-[160px] border-white/10 bg-black font-mono text-xs text-zinc-100"
                 />
-                <Button onClick={handleImport} className="w-full bg-orange-500 text-slate-950 hover:bg-orange-400">
+                <Button onClick={handleImport} className="w-full border border-white/10 bg-white text-black hover:bg-zinc-200">
                   Import Component JSON
                 </Button>
                 {importStatus ? (
-                  <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2 text-sm text-slate-300">
+                  <div className="rounded-xl border border-white/10 bg-black px-3 py-2 text-sm text-zinc-300">
                     {importStatus}
                   </div>
                 ) : null}
               </CardContent>
             </Card>
 
-            <Card className="border-slate-800/90 bg-slate-950/80 text-slate-100 shadow-none">
+            <Card className="border-white/10 bg-[#050505] text-zinc-100 shadow-none">
               <CardHeader>
                 <CardTitle className="text-xl text-white">Generated Draft JSON</CardTitle>
-                <CardDescription className="text-slate-400">
+                <CardDescription className="text-zinc-500">
                   This is the canonical lesson draft the future simulator loader can consume.
                 </CardDescription>
               </CardHeader>
@@ -791,7 +787,7 @@ export default function SimulatorBuilderClient() {
                 <Textarea
                   readOnly
                   value={JSON.stringify(lessonDraft, null, 2)}
-                  className="min-h-[360px] border-slate-800 bg-slate-900 font-mono text-xs text-slate-100"
+                  className="min-h-[360px] border-white/10 bg-black font-mono text-xs text-zinc-100"
                 />
               </CardContent>
             </Card>
