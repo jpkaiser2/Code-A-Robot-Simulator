@@ -5,7 +5,7 @@ import SimulatorTestClient from "@/components/simulator/SimulatorTestClient";
 export const metadata: Metadata = {
   title: "Simulator Test | Simulator Studio",
   description:
-    "Standalone FTC simulator testbed using Three.js, a Java bridge harness, and state-driven robot control.",
+    "Full-page FTC simulator workspace with code, controls, and a live robot view.",
 };
 
 export default function SimulatorTestPage() {

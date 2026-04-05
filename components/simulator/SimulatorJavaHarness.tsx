@@ -7,18 +7,14 @@ import "ace-builds/src-noconflict/theme-monokai";
 import "ace-builds/src-noconflict/ext-language_tools";
 
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import F310Gamepad, { type F310State } from "@/components/simulator/F310Gamepad";
+import type { F310State } from "@/components/simulator/F310Gamepad";
 import type { SimulatorBridge } from "@/lib/simulator/mechanismSimulator";
 
 interface SimulatorJavaHarnessProps {
   bridge: SimulatorBridge;
+  editorHeight: number;
+  onEditorResizeStart: (event: React.PointerEvent<HTMLDivElement>) => void;
+  gamepadState: F310State;
 }
 
 type HarnessStatus = "loading" | "ready" | "running" | "error";
@@ -545,8 +541,8 @@ const HARNESS_HTML = `<!DOCTYPE html>
         margin: 0;
         width: 100%;
         height: 100%;
-        background: #020617;
-        color: #e2e8f0;
+        background: #000000;
+        color: #f4f4f5;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       }
       #status {
@@ -558,13 +554,13 @@ const HARNESS_HTML = `<!DOCTYPE html>
         font-size: 13px;
         letter-spacing: 0.04em;
         text-transform: uppercase;
-        color: #94a3b8;
+        color: #71717a;
       }
     </style>
     <script src="https://cjrtnc.leaningtech.com/4.2/loader.js"></script>
   </head>
   <body>
-    <div id="status">Loading CheerpJ harness…</div>
+    <div id="status">Loading runtime…</div>
     <script>
       const statusEl = document.getElementById("status");
 
@@ -909,6 +905,9 @@ const HARNESS_HTML = `<!DOCTYPE html>
 
 export default function SimulatorJavaHarness({
   bridge,
+  editorHeight,
+  onEditorResizeStart,
+  gamepadState,
 }: SimulatorJavaHarnessProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [status, setStatus] = useState<HarnessStatus>("loading");
@@ -916,35 +915,8 @@ export default function SimulatorJavaHarness({
   const [pendingRun, setPendingRun] = useState(false);
   const [files, setFiles] = useState<HarnessFile[]>(() => createAutonomousTemplate());
   const [activeFileId, setActiveFileId] = useState("1");
-  const [gamepadState, setGamepadState] = useState<F310State>({
-    buttons: {
-      a: false,
-      b: false,
-      x: false,
-      y: false,
-      dpad_up: false,
-      dpad_down: false,
-      dpad_left: false,
-      dpad_right: false,
-      left_bumper: false,
-      right_bumper: false,
-      left_stick_button: false,
-      right_stick_button: false,
-      back: false,
-      start: false,
-      guide: false,
-    },
-    axes: {
-      left_stick_x: 0,
-      left_stick_y: 0,
-      right_stick_x: 0,
-      right_stick_y: 0,
-      left_trigger: 0,
-      right_trigger: 0,
-    },
-  });
   const [logEntries, setLogEntries] = useState<HarnessLogEntry[]>([
-    { id: 1, tone: "default", message: "Preparing isolated CheerpJ harness..." },
+    { id: 1, tone: "default", message: "Preparing runtime..." },
   ]);
 
   const activeFile = useMemo(
@@ -974,7 +946,7 @@ export default function SimulatorJavaHarness({
       switch (event.data.type) {
         case "sim-java-ready":
           setStatus("ready");
-          appendLog("CheerpJ simulator runtime is ready.", "success");
+          appendLog("Runtime ready.", "success");
           break;
         case "sim-java-log":
           appendLog(String(event.data.message));
@@ -982,12 +954,12 @@ export default function SimulatorJavaHarness({
         case "sim-java-waiting-for-start":
           setStatus("ready");
           setAwaitingStart(true);
-          appendLog("OpMode initialized and waiting for start.", "success");
+          appendLog("Code loaded. Waiting for start.", "success");
           break;
         case "sim-java-started":
           setStatus("running");
           setAwaitingStart(false);
-          appendLog("Start signal delivered to Java opmode.", "success");
+          appendLog("Run started.", "success");
           break;
         case "sim-java-motor-power":
           bridge.setMotorPower(String(event.data.deviceName), Number(event.data.power));
@@ -1065,7 +1037,7 @@ export default function SimulatorJavaHarness({
           setStatus("ready");
           setAwaitingStart(false);
           setPendingRun(false);
-          appendLog("User code completed against the simulator runtime.", "success");
+          appendLog("Run complete.", "success");
           break;
         case "sim-java-error":
           setStatus("error");
@@ -1092,7 +1064,7 @@ export default function SimulatorJavaHarness({
     setAwaitingStart(false);
     setPendingRun(false);
     bridge.reset();
-    appendLog("Compiling user code with the hidden simulator runtime...");
+    appendLog("Compiling and starting your code...");
     iframeRef.current.contentWindow.postMessage(
       {
         type: "sim-java-run-demo",
@@ -1109,12 +1081,12 @@ export default function SimulatorJavaHarness({
   const runDemo = useCallback(() => {
     if (status === "loading") {
       setPendingRun(true);
-      appendLog("Harness still loading. Demo will start automatically when ready.");
+      appendLog("Runtime is still loading. Your run will start automatically.");
       return;
     }
 
     if (status === "running") {
-      appendLog("Java demo is already running.");
+      appendLog("A run is already in progress.");
       return;
     }
 
@@ -1133,7 +1105,7 @@ export default function SimulatorJavaHarness({
       return;
     }
 
-    appendLog("Sending start signal to Java opmode...");
+    appendLog("Starting...");
     iframeRef.current.contentWindow.postMessage(
       {
         type: "sim-java-start-opmode",
@@ -1150,7 +1122,7 @@ export default function SimulatorJavaHarness({
 
     setAwaitingStart(false);
     setPendingRun(false);
-    appendLog("Sending stop signal to Java opmode...");
+    appendLog("Stopping...");
     iframeRef.current.contentWindow.postMessage(
       {
         type: "sim-java-stop-opmode",
@@ -1162,19 +1134,19 @@ export default function SimulatorJavaHarness({
   const resetFiles = useCallback(() => {
     setFiles(createAutonomousTemplate());
     setActiveFileId("1");
-    appendLog("Editable user files reset to defaults.", "success");
+    appendLog("Code reset.", "success");
   }, [appendLog]);
 
   const loadTeleOpTemplate = useCallback(() => {
     setFiles(createTeleOpTemplate());
     setActiveFileId("1");
-    appendLog("Loaded FTC-style teleop template.", "success");
+    appendLog("TeleOp template loaded.", "success");
   }, [appendLog]);
 
   const loadAutonomousTemplate = useCallback(() => {
     setFiles(createAutonomousTemplate());
     setActiveFileId("1");
-    appendLog("Loaded FTC-style autonomous template.", "success");
+    appendLog("Autonomous template loaded.", "success");
   }, [appendLog]);
 
   const handleFileChange = useCallback((nextContent: string) => {
@@ -1188,282 +1160,171 @@ export default function SimulatorJavaHarness({
   const statusLabel = useMemo(() => {
     switch (status) {
       case "loading":
-        return "Loading harness";
+        return "Loading";
       case "ready":
-        return "Ready for Java demo";
+        return awaitingStart ? "Waiting to start" : "Ready";
       case "running":
-        return "Running Java demo";
+        return "Running";
       case "error":
-        return "Harness error";
+        return "Error";
     }
-  }, [status]);
-
-  const conflictingControls = useMemo<Record<string, string[]>>(
-    () => ({
-      a: ["y"],
-      y: ["a"],
-      left_bumper: ["right_bumper"],
-      right_bumper: ["left_bumper"],
-      dpad_up: ["dpad_down"],
-      dpad_down: ["dpad_up"],
-      dpad_left: ["dpad_right"],
-      dpad_right: ["dpad_left"],
-    }),
-    []
-  );
-
-  const setGamepadButtonState = useCallback(
-    (controlName: string, nextValue: boolean) => {
-      setGamepadState((previousState) => {
-        const nextState = {
-          ...previousState,
-          buttons: {
-            ...previousState.buttons,
-            [controlName]: nextValue,
-          },
-        };
-
-        if (nextValue) {
-          for (const conflictingControl of conflictingControls[controlName] ?? []) {
-            nextState.buttons[conflictingControl as keyof typeof nextState.buttons] = false;
-          }
-        }
-
-        return nextState;
-      });
-    },
-    [conflictingControls]
-  );
-
-  const clearGamepad = useCallback(() => {
-    setGamepadState({
-      buttons: {
-        a: false,
-        b: false,
-        x: false,
-        y: false,
-        dpad_up: false,
-        dpad_down: false,
-        dpad_left: false,
-        dpad_right: false,
-        left_bumper: false,
-        right_bumper: false,
-        left_stick_button: false,
-        right_stick_button: false,
-        back: false,
-        start: false,
-        guide: false,
-      },
-      axes: {
-        left_stick_x: 0,
-        left_stick_y: 0,
-        right_stick_x: 0,
-        right_stick_y: 0,
-        left_trigger: 0,
-        right_trigger: 0,
-      },
-    });
-  }, []);
-
-  const setGamepadAxisState = useCallback(
-    (
-      axisName:
-        | "left_stick_x"
-        | "left_stick_y"
-        | "right_stick_x"
-        | "right_stick_y"
-        | "left_trigger"
-        | "right_trigger",
-      nextValue: number
-    ) => {
-      setGamepadState((previousState) => ({
-        ...previousState,
-        axes: {
-          ...previousState.axes,
-          [axisName]: nextValue,
-        },
-      }));
-    },
-    []
-  );
-
-  const bindGamepadPress = useCallback(
-    (controlName: string) => ({
-      onMouseDown: () => setGamepadButtonState(controlName, true),
-      onMouseUp: () => setGamepadButtonState(controlName, false),
-      onMouseLeave: () => setGamepadButtonState(controlName, false),
-      onTouchStart: () => setGamepadButtonState(controlName, true),
-      onTouchEnd: () => setGamepadButtonState(controlName, false),
-      onTouchCancel: () => setGamepadButtonState(controlName, false),
-    }),
-    [setGamepadButtonState]
-  );
+  }, [awaitingStart, status]);
 
   return (
-    <Card className="border-slate-800 bg-slate-950/80 text-slate-100 shadow-none">
-      <CardHeader>
-        <CardTitle className="text-xl text-white">Java Bridge Harness</CardTitle>
-        <CardDescription className="text-slate-400">
-          Isolated CheerpJ runtime with a tiny FTC-style mock package backed by native methods that
-          forward Java calls into the simulator bridge.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="space-y-1">
-            <div className="text-sm text-slate-300">{statusLabel}</div>
-            <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-              Detected {detectedOpModeType === "teleop" ? "TeleOp" : "Autonomous"} opmode
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <Button onClick={runDemo} disabled={status === "running"}>
-              Load Code
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={startOpMode}
-              disabled={!awaitingStart}
-            >
-              Start OpMode
-            </Button>
-            <Button
-              variant="outline"
-              onClick={stopOpMode}
-              className="bg-slate-900 text-slate-100"
-            >
-              Stop OpMode
-            </Button>
-            <Button variant="outline" onClick={resetFiles} className="bg-slate-900 text-slate-100">
-              Reset Files
-            </Button>
-          </div>
+    <div className="flex h-full min-h-0 flex-col bg-black text-white">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-4 sm:px-6">
+        <div className="flex items-center gap-2">
+          <div
+            className={`h-2.5 w-2.5 rounded-full ${
+              status === "running"
+                ? "bg-emerald-400"
+                : status === "error"
+                  ? "bg-rose-400"
+                  : "bg-zinc-500"
+            }`}
+          />
+          <span className="text-sm text-zinc-300">{statusLabel}</span>
+          <span className="rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] uppercase tracking-[0.2em] text-zinc-500">
+            {detectedOpModeType === "teleop" ? "TeleOp" : "Auto"}
+          </span>
         </div>
 
-        <iframe
-          ref={iframeRef}
-          srcDoc={HARNESS_HTML}
-          title="Simulator Java Harness"
-          className="h-24 w-full rounded-2xl border border-slate-800 bg-slate-950"
-        />
-
-        <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950">
-          <div className="border-b border-slate-800 px-4 py-3 text-xs uppercase tracking-[0.22em] text-slate-400">
-            User Java Workbench
-          </div>
-          <div className="flex flex-wrap gap-2 border-b border-slate-800 bg-slate-950 px-4 py-3">
-            <Button size="sm" variant="secondary" onClick={loadAutonomousTemplate}>
-              Load Autonomous Template
-            </Button>
-            <Button size="sm" variant="secondary" onClick={loadTeleOpTemplate}>
-              Load TeleOp Template
-            </Button>
-          </div>
-          <div className="flex flex-wrap border-b border-slate-800 bg-slate-900/70">
-            {files.map((file) => (
-              <button
-                key={file.id}
-                onClick={() => setActiveFileId(file.id)}
-                className={`border-r border-slate-800 px-4 py-2 text-sm transition-colors ${
-                  activeFile?.id === file.id
-                    ? "bg-slate-950 text-white"
-                    : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
-                }`}
-              >
-                {file.name}
-              </button>
-            ))}
-          </div>
-          <div className="h-[420px]">
-            {activeFile ? (
-              <AceEditor
-                mode="java"
-                theme="monokai"
-                name="simulator-java-workbench"
-                value={activeFile.content}
-                onChange={handleFileChange}
-                width="100%"
-                height="100%"
-                setOptions={{
-                  enableBasicAutocompletion: true,
-                  enableLiveAutocompletion: true,
-                  enableSnippets: true,
-                  fontSize: 14,
-                  showPrintMargin: false,
-                  useWorker: false,
-                  wrap: true,
-                }}
-              />
-            ) : null}
-          </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            onClick={runDemo}
+            disabled={status === "running"}
+            className="border border-white/10 bg-white text-black hover:bg-zinc-200"
+          >
+            Run Code
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={startOpMode}
+            disabled={!awaitingStart}
+            className="bg-zinc-900 text-white hover:bg-zinc-800"
+          >
+            Start
+          </Button>
+          <Button
+            variant="outline"
+            onClick={stopOpMode}
+            className="border-white/10 bg-transparent text-zinc-100 hover:bg-zinc-900"
+          >
+            Stop
+          </Button>
+          <Button
+            variant="outline"
+            onClick={resetFiles}
+            className="border-white/10 bg-transparent text-zinc-100 hover:bg-zinc-900"
+          >
+            Reset
+          </Button>
         </div>
+      </div>
 
-        {detectedOpModeType === "teleop" ? (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <p className="mb-1 text-sm font-medium text-slate-100">Gamepad 1</p>
-                <p className="mb-0 text-xs text-slate-400">
-                  Logitech F310-style input mapped to real FTC `gamepad1` fields.
-                </p>
-              </div>
-              <Button size="sm" variant="outline" className="bg-slate-950 text-slate-100" onClick={clearGamepad}>
-                Clear Buttons
-              </Button>
-            </div>
-            <F310Gamepad
-              state={gamepadState}
-              onAxisChange={setGamepadAxisState}
-              onButtonChange={setGamepadButtonState}
-            />
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3 font-mono text-xs text-slate-300">
-                `left_stick_x`: {gamepadState.axes.left_stick_x.toFixed(2)}
-                <br />
-                `left_stick_y`: {gamepadState.axes.left_stick_y.toFixed(2)}
-                <br />
-                `right_stick_x`: {gamepadState.axes.right_stick_x.toFixed(2)}
-                <br />
-                `right_stick_y`: {gamepadState.axes.right_stick_y.toFixed(2)}
-              </div>
-              <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3 font-mono text-xs text-slate-300">
-                `left_trigger`: {gamepadState.axes.left_trigger.toFixed(2)}
-                <br />
-                `right_trigger`: {gamepadState.axes.right_trigger.toFixed(2)}
-              </div>
-              <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3 font-mono text-xs text-slate-300">
-                Buttons:{" "}
-                {Object.entries(gamepadState.buttons)
-                  .filter(([, value]) => value)
-                  .map(([key]) => key)
-                  .join(", ") || "none"}
-              </div>
-            </div>
-          </div>
-        ) : null}
+      <iframe
+        ref={iframeRef}
+        srcDoc={HARNESS_HTML}
+        title="Simulator Runtime"
+        className="pointer-events-none absolute h-0 w-0 opacity-0"
+      />
 
-        <div className="space-y-2 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 font-mono text-xs sm:text-sm">
-          {logEntries.map((entry) => (
-            <div
-              key={entry.id}
-              className={
-                entry.tone === "error"
-                  ? "text-rose-300"
-                  : entry.tone === "success"
-                    ? "text-emerald-300"
-                    : "text-slate-200"
-              }
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-3 sm:px-6">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={loadAutonomousTemplate}
+            className="bg-zinc-900 text-white hover:bg-zinc-800"
+          >
+            Autonomous
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={loadTeleOpTemplate}
+            className="bg-zinc-900 text-white hover:bg-zinc-800"
+          >
+            TeleOp
+          </Button>
+        </div>
+        <div className="text-xs text-zinc-500">Code</div>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex flex-wrap border-b border-white/10 bg-[#050505]">
+          {files.map((file) => (
+            <button
+              key={file.id}
+              onClick={() => setActiveFileId(file.id)}
+              className={`border-r border-white/10 px-4 py-2.5 text-sm transition-colors ${
+                activeFile?.id === file.id
+                  ? "bg-black text-white"
+                  : "text-zinc-500 hover:bg-zinc-950 hover:text-zinc-200"
+              }`}
             >
-              {entry.message}
-            </div>
+              {file.name}
+            </button>
           ))}
         </div>
 
-        <p className="mb-0 text-xs text-slate-500">
-          Hidden runtime support provides FTC-style classes, opmode lifecycle handling, and gamepad
-          mapping while keeping the visible editor focused on robot-ready code.
-        </p>
-      </CardContent>
-    </Card>
+        <div className="min-h-[320px]" style={{ height: `${editorHeight}px` }}>
+          {activeFile ? (
+            <AceEditor
+              mode="java"
+              theme="monokai"
+              name="simulator-java-workbench"
+              value={activeFile.content}
+              onChange={handleFileChange}
+              width="100%"
+              height="100%"
+              setOptions={{
+                enableBasicAutocompletion: true,
+                enableLiveAutocompletion: true,
+                enableSnippets: true,
+                fontSize: 14,
+                showPrintMargin: false,
+                useWorker: false,
+                wrap: true,
+              }}
+            />
+          ) : null}
+        </div>
+
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          onPointerDown={onEditorResizeStart}
+          className="group flex h-4 cursor-row-resize items-center justify-center border-t border-white/10 bg-black"
+        >
+          <div className="h-1 w-14 rounded-full bg-zinc-800 transition-colors group-hover:bg-zinc-600" />
+        </div>
+
+        <div className="border-t border-white/10 px-5 py-4 sm:px-6">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="mb-0 text-sm font-medium text-white">Console</p>
+            <p className="mb-0 text-xs text-zinc-500">Latest output</p>
+          </div>
+          <div className="h-40 overflow-y-auto rounded-2xl border border-white/10 bg-[#050505] p-4 font-mono text-xs sm:text-sm">
+            <div className="space-y-2">
+              {logEntries.map((entry) => (
+                <div
+                  key={entry.id}
+                  className={
+                    entry.tone === "error"
+                      ? "text-rose-300"
+                      : entry.tone === "success"
+                        ? "text-emerald-300"
+                        : "text-zinc-300"
+                  }
+                >
+                  {entry.message}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

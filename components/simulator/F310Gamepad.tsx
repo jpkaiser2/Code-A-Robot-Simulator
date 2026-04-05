@@ -202,7 +202,7 @@ export default function F310Gamepad({ onAxisChange, onButtonChange, state }: F31
 
     let animationFrameId = 0;
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#0f172a");
+    scene.background = new THREE.Color("#050505");
 
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));
@@ -588,7 +588,7 @@ export default function F310Gamepad({ onAxisChange, onButtonChange, state }: F31
           material.emissiveIntensity = baseIntensity;
 
           if (active) {
-            material.emissive.set(target.kind === "trigger" ? "#f59e0b" : "#38bdf8");
+            material.emissive.set(target.kind === "trigger" ? "#d4d4d8" : "#ffffff");
             material.emissiveIntensity = 0.6;
           }
         });
@@ -688,12 +688,11 @@ export default function F310Gamepad({ onAxisChange, onButtonChange, state }: F31
   }, [onAxisChange, onButtonChange]);
 
   return (
-    <div className="overflow-hidden rounded-[2rem] border border-slate-700/80 bg-[radial-gradient(circle_at_50%_0%,rgba(125,211,252,0.15),rgba(15,23,42,0.94)_38%,rgba(2,6,23,1)_100%)] shadow-[0_20px_50px_rgba(2,6,23,0.5)]">
-      <div className="border-b border-slate-800/80 px-5 py-4">
-        <p className="mb-1 text-sm font-medium text-slate-100">3D Gamepad Model</p>
-        <p className="mb-0 text-xs text-slate-400">
-          Click the actual controller meshes to drive FTC `gamepad1` state. Sticks drag, triggers
-          press, and the d-pad resolves direction from the hit point on the real model.
+    <div className="overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#050505] shadow-[0_20px_50px_rgba(0,0,0,0.45)]">
+      <div className="border-b border-white/10 px-5 py-4">
+        <p className="mb-1 text-sm font-medium text-white">3D Controller</p>
+        <p className="mb-0 text-xs text-zinc-500">
+          Click or drag directly on the controller to drive `gamepad1`.
         </p>
       </div>
 
@@ -704,21 +703,21 @@ export default function F310Gamepad({ onAxisChange, onButtonChange, state }: F31
           aria-label="Interactive 3D gamepad model"
         />
         {loadError ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80 px-6 text-center text-sm text-slate-300">
+          <div className="absolute inset-0 flex items-center justify-center bg-black/80 px-6 text-center text-sm text-zinc-300">
             {loadError}
           </div>
         ) : null}
       </div>
 
-      <div className="grid gap-3 border-t border-slate-800/80 px-5 py-4 text-xs text-slate-400 sm:grid-cols-2">
-        <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 font-mono">
+      <div className="grid gap-3 border-t border-white/10 px-5 py-4 text-xs text-zinc-400 sm:grid-cols-2">
+        <div className="rounded-xl border border-white/10 bg-black/60 p-3 font-mono">
           Active buttons:{" "}
           {Object.entries(state.buttons)
             .filter(([, value]) => value)
             .map(([key]) => key)
             .join(", ") || "none"}
         </div>
-        <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 font-mono">
+        <div className="rounded-xl border border-white/10 bg-black/60 p-3 font-mono">
           LS({state.axes.left_stick_x.toFixed(2)}, {state.axes.left_stick_y.toFixed(2)}) | RS(
           {state.axes.right_stick_x.toFixed(2)}, {state.axes.right_stick_y.toFixed(2)}) | LT{" "}
           {state.axes.left_trigger.toFixed(2)} | RT {state.axes.right_trigger.toFixed(2)}

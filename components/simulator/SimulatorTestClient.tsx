@@ -1,18 +1,12 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import F310Gamepad, { type F310State } from "@/components/simulator/F310Gamepad";
 import {
   createSimulatorBridge,
   createSimulatorStore,
@@ -25,19 +19,9 @@ const SimulatorJavaHarness = dynamic(
   {
     ssr: false,
     loading: () => (
-      <Card className="h-full border-slate-800 bg-slate-950/80 text-slate-100 shadow-none">
-        <CardHeader>
-          <CardTitle className="text-xl text-white">Java Workbench</CardTitle>
-          <CardDescription className="text-slate-400">
-            Loading the editor and simulator runtime...
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex h-[680px] items-center justify-center rounded-2xl border border-slate-800 bg-slate-900/70 text-sm text-slate-400">
-            Preparing code editor
-          </div>
-        </CardContent>
-      </Card>
+      <div className="flex h-full min-h-[640px] items-center justify-center border-r border-white/10 bg-black text-sm text-zinc-500">
+        Loading editor
+      </div>
     ),
   }
 );
@@ -46,6 +30,47 @@ declare global {
   interface Window {
     codeARobotSimulator?: SimulatorBridge;
   }
+}
+
+const GAMEPAD_CONFLICTS: Record<string, string[]> = {
+  a: ["y"],
+  y: ["a"],
+  left_bumper: ["right_bumper"],
+  right_bumper: ["left_bumper"],
+  dpad_up: ["dpad_down"],
+  dpad_down: ["dpad_up"],
+  dpad_left: ["dpad_right"],
+  dpad_right: ["dpad_left"],
+};
+
+function createDefaultGamepadState(): F310State {
+  return {
+    buttons: {
+      a: false,
+      b: false,
+      x: false,
+      y: false,
+      dpad_up: false,
+      dpad_down: false,
+      dpad_left: false,
+      dpad_right: false,
+      left_bumper: false,
+      right_bumper: false,
+      left_stick_button: false,
+      right_stick_button: false,
+      back: false,
+      start: false,
+      guide: false,
+    },
+    axes: {
+      left_stick_x: 0,
+      left_stick_y: 0,
+      right_stick_x: 0,
+      right_stick_y: 0,
+      left_trigger: 0,
+      right_trigger: 0,
+    },
+  };
 }
 
 function useSimulatorSnapshot() {
@@ -68,11 +93,148 @@ function useSimulatorSnapshot() {
 
 export default function SimulatorTestClient() {
   const mountRef = useRef<HTMLDivElement | null>(null);
+  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const rightPaneRef = useRef<HTMLElement | null>(null);
   const { bridge, snapshot, store } = useSimulatorSnapshot();
+  const [leftPaneWidth, setLeftPaneWidth] = useState(40);
+  const [middlePaneWidth, setMiddlePaneWidth] = useState(24);
+  const [editorHeight, setEditorHeight] = useState(520);
+  const [simulatorHeight, setSimulatorHeight] = useState(520);
+  const [gamepadState, setGamepadState] = useState<F310State>(() => createDefaultGamepadState());
 
-  const statusTone = useMemo(() => {
-    return snapshot.status === "running" ? "text-emerald-300" : "text-amber-300";
-  }, [snapshot.status]);
+  const startLeftResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!layoutRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+    const bounds = layoutRef.current.getBoundingClientRect();
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      const nextWidth = ((moveEvent.clientX - bounds.left) / bounds.width) * 100;
+      setLeftPaneWidth(Math.min(58, Math.max(22, nextWidth)));
+    };
+
+    const handleUp = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  }, []);
+
+  const startMiddleResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!layoutRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+    const bounds = layoutRef.current.getBoundingClientRect();
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      const pointerWidth = ((moveEvent.clientX - bounds.left) / bounds.width) * 100;
+      const minBoundary = leftPaneWidth + 16;
+      const maxBoundary = 78;
+      const clampedBoundary = Math.min(maxBoundary, Math.max(minBoundary, pointerWidth));
+      setMiddlePaneWidth(clampedBoundary - leftPaneWidth);
+    };
+
+    const handleUp = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  }, [leftPaneWidth]);
+
+  const startEditorResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = editorHeight;
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      const nextHeight = startHeight + (moveEvent.clientY - startY);
+      setEditorHeight(Math.min(900, Math.max(280, nextHeight)));
+    };
+
+    const handleUp = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  }, [editorHeight]);
+
+  const startSimulatorResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = simulatorHeight;
+    const maxHeight = rightPaneRef.current
+      ? Math.max(320, rightPaneRef.current.getBoundingClientRect().height - 110)
+      : 900;
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      const nextHeight = startHeight + (moveEvent.clientY - startY);
+      setSimulatorHeight(Math.min(maxHeight, Math.max(280, nextHeight)));
+    };
+
+    const handleUp = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  }, [simulatorHeight]);
+
+  const setGamepadButtonState = useCallback((controlName: string, nextValue: boolean) => {
+    setGamepadState((previousState) => {
+      const nextState = {
+        ...previousState,
+        buttons: {
+          ...previousState.buttons,
+          [controlName]: nextValue,
+        },
+      };
+
+      if (nextValue) {
+        for (const conflictingControl of GAMEPAD_CONFLICTS[controlName] ?? []) {
+          nextState.buttons[conflictingControl as keyof typeof nextState.buttons] = false;
+        }
+      }
+
+      return nextState;
+    });
+  }, []);
+
+  const setGamepadAxisState = useCallback(
+    (
+      axisName:
+        | "left_stick_x"
+        | "left_stick_y"
+        | "right_stick_x"
+        | "right_stick_y"
+        | "left_trigger"
+        | "right_trigger",
+      nextValue: number
+    ) => {
+      setGamepadState((previousState) => ({
+        ...previousState,
+        axes: {
+          ...previousState.axes,
+          [axisName]: nextValue,
+        },
+      }));
+    },
+    []
+  );
+
+  const clearGamepad = useCallback(() => {
+    setGamepadState(createDefaultGamepadState());
+  }, []);
 
   useEffect(() => {
     const container = mountRef.current;
@@ -81,8 +243,8 @@ export default function SimulatorTestClient() {
     }
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#09111f");
-    scene.fog = new THREE.Fog("#09111f", 12, 48);
+    scene.background = new THREE.Color("#050505");
+    scene.fog = new THREE.Fog("#050505", 12, 48);
 
     const camera = new THREE.PerspectiveCamera(
       50,
@@ -106,10 +268,10 @@ export default function SimulatorTestClient() {
     controls.maxDistance = 20;
     controls.maxPolarAngle = Math.PI * 0.48;
 
-    const hemiLight = new THREE.HemisphereLight("#dbeafe", "#102033", 1.5);
+    const hemiLight = new THREE.HemisphereLight("#f5f5f5", "#111111", 1.2);
     scene.add(hemiLight);
 
-    const sunLight = new THREE.DirectionalLight("#ffffff", 1.6);
+    const sunLight = new THREE.DirectionalLight("#ffffff", 1.35);
     sunLight.position.set(6, 10, 4);
     sunLight.castShadow = true;
     sunLight.shadow.mapSize.set(1024, 1024);
@@ -118,25 +280,25 @@ export default function SimulatorTestClient() {
     const floor = new THREE.Mesh(
       new THREE.BoxGeometry(10.5, 0.25, 10.5),
       new THREE.MeshStandardMaterial({
-        color: "#162235",
-        metalness: 0.15,
-        roughness: 0.88,
+        color: "#111111",
+        metalness: 0.08,
+        roughness: 0.92,
       })
     );
     floor.receiveShadow = true;
     floor.position.y = -0.125;
     scene.add(floor);
 
-    const grid = new THREE.GridHelper(10, 10, "#4f8cff", "#20324d");
+    const grid = new THREE.GridHelper(10, 10, "#2f2f2f", "#1a1a1a");
     grid.position.y = 0.01;
     scene.add(grid);
 
     const fieldBorder = new THREE.Mesh(
       new THREE.BoxGeometry(10.7, 0.18, 10.7),
       new THREE.MeshStandardMaterial({
-        color: "#0f172a",
-        metalness: 0.2,
-        roughness: 0.78,
+        color: "#090909",
+        metalness: 0.14,
+        roughness: 0.88,
       })
     );
     fieldBorder.receiveShadow = true;
@@ -149,9 +311,9 @@ export default function SimulatorTestClient() {
     const chassis = new THREE.Mesh(
       new THREE.BoxGeometry(1.7, 0.32, 1.55),
       new THREE.MeshStandardMaterial({
-        color: "#334155",
-        metalness: 0.28,
-        roughness: 0.68,
+        color: "#3a3a3a",
+        metalness: 0.18,
+        roughness: 0.78,
       })
     );
     chassis.position.y = 0.36;
@@ -162,7 +324,7 @@ export default function SimulatorTestClient() {
     const bumper = new THREE.Mesh(
       new THREE.BoxGeometry(1.84, 0.18, 1.69),
       new THREE.MeshStandardMaterial({
-        color: "#1e293b",
+        color: "#191919",
         metalness: 0.08,
         roughness: 0.92,
       })
@@ -198,7 +360,7 @@ export default function SimulatorTestClient() {
 
     const shoulderJoint = new THREE.Mesh(
       new THREE.CylinderGeometry(0.24, 0.24, 1.1, 20),
-      new THREE.MeshStandardMaterial({ color: "#93c5fd", metalness: 0.4, roughness: 0.4 })
+      new THREE.MeshStandardMaterial({ color: "#bdbdbd", metalness: 0.35, roughness: 0.45 })
     );
     shoulderJoint.rotation.z = Math.PI / 2;
     shoulderJoint.castShadow = true;
@@ -209,7 +371,7 @@ export default function SimulatorTestClient() {
 
     const upperArm = new THREE.Mesh(
       new THREE.BoxGeometry(0.45, 2.4, 0.45),
-      new THREE.MeshStandardMaterial({ color: "#e2e8f0", metalness: 0.22, roughness: 0.45 })
+      new THREE.MeshStandardMaterial({ color: "#d4d4d4", metalness: 0.18, roughness: 0.5 })
     );
     upperArm.position.y = 1.2;
     upperArm.castShadow = true;
@@ -221,14 +383,14 @@ export default function SimulatorTestClient() {
 
     const wristBlock = new THREE.Mesh(
       new THREE.BoxGeometry(0.55, 0.32, 0.55),
-      new THREE.MeshStandardMaterial({ color: "#38bdf8", metalness: 0.25, roughness: 0.35 })
+      new THREE.MeshStandardMaterial({ color: "#8a8a8a", metalness: 0.18, roughness: 0.45 })
     );
     wristBlock.castShadow = true;
     wristMount.add(wristBlock);
 
     const leftFinger = new THREE.Mesh(
       new THREE.BoxGeometry(0.14, 0.62, 0.18),
-      new THREE.MeshStandardMaterial({ color: "#fb7185", metalness: 0.1, roughness: 0.4 })
+      new THREE.MeshStandardMaterial({ color: "#efefef", metalness: 0.08, roughness: 0.45 })
     );
     leftFinger.position.set(-0.16, 0.48, 0);
     leftFinger.castShadow = true;
@@ -236,15 +398,11 @@ export default function SimulatorTestClient() {
 
     const rightFinger = new THREE.Mesh(
       new THREE.BoxGeometry(0.14, 0.62, 0.18),
-      new THREE.MeshStandardMaterial({ color: "#fb7185", metalness: 0.1, roughness: 0.4 })
+      new THREE.MeshStandardMaterial({ color: "#efefef", metalness: 0.08, roughness: 0.45 })
     );
     rightFinger.position.set(0.16, 0.48, 0);
     rightFinger.castShadow = true;
     wristMount.add(rightFinger);
-
-    const axes = new THREE.AxesHelper(1.8);
-    axes.position.set(-4.2, 0.12, -4.2);
-    scene.add(axes);
 
     let frameId = 0;
     let previousTime = performance.now();
@@ -272,6 +430,11 @@ export default function SimulatorTestClient() {
       renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
     };
 
+    const resizeObserver = new ResizeObserver(() => {
+      handleResize();
+    });
+    resizeObserver.observe(container);
+
     const tick = (time: number) => {
       const deltaSeconds = Math.min((time - previousTime) / 1000, 0.05);
       previousTime = time;
@@ -284,12 +447,14 @@ export default function SimulatorTestClient() {
     };
 
     applyStateToMeshes(store.getState());
+    handleResize();
     window.addEventListener("resize", handleResize);
     frameId = window.requestAnimationFrame(tick);
 
     return () => {
       window.cancelAnimationFrame(frameId);
       window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
       controls.dispose();
       renderer.dispose();
       container.removeChild(renderer.domElement);
@@ -321,246 +486,133 @@ export default function SimulatorTestClient() {
   }, [bridge, store]);
 
   return (
-    <div className="px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-        <div className="flex flex-col gap-6 rounded-3xl border border-border/60 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-6 shadow-2xl shadow-sky-950/20">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-            <div className="max-w-3xl space-y-2">
-              <p className="text-sm uppercase tracking-[0.28em] text-sky-300/80">
+    <div className="bg-black text-white">
+      <div
+        ref={layoutRef}
+        className="flex min-h-[calc(100vh-4rem)] flex-col xl:flex-row"
+      >
+        <section
+          className="flex min-h-[50vh] w-full min-w-0 flex-col border-b border-white/10 bg-black xl:min-h-[calc(100vh-4rem)] xl:w-auto xl:border-b-0 xl:shrink-0"
+          style={{ flexBasis: `${leftPaneWidth}%` }}
+        >
+          <div className="flex items-center justify-between border-b border-white/10 px-5 py-4 sm:px-6">
+            <div>
+              <p className="mb-1 text-[11px] uppercase tracking-[0.28em] text-zinc-500">
                 Simulator Test
               </p>
-              <h1 className="mb-0 text-4xl font-bold tracking-tight text-white sm:text-5xl">
-                FTC mechanism MVP for future CheerpJ control
-              </h1>
-              <p className="mb-0 max-w-2xl text-base text-slate-300 sm:text-lg">
-                This prototype keeps simulator state, user actions, and mesh updates separate so
-                future Java bridge calls can drive the same system without rewriting the renderer.
-              </p>
             </div>
-            <div className="rounded-2xl border border-sky-400/20 bg-slate-950/70 px-4 py-3 text-sm text-slate-300">
-              <div className="font-medium text-slate-100">Architecture status</div>
-              <div className={statusTone}>Simulation loop: {snapshot.status}</div>
+            <div
+              className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                snapshot.status === "running"
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                  : "border-white/10 bg-white/5 text-zinc-300"
+              }`}
+            >
+              {snapshot.status === "running" ? "Running" : "Ready"}
             </div>
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.28fr)]">
-            <Card className="overflow-hidden border-slate-800 bg-slate-950/80 text-slate-100 shadow-none">
-              <CardHeader className="border-b border-slate-800/80 pb-4">
-                <CardTitle className="text-xl text-white">Mechanism View</CardTitle>
-                <CardDescription className="text-slate-400">
-                  Orbit around the testbed while the render loop applies transforms from simulator
-                  state.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div
-                  ref={mountRef}
-                  className="h-[420px] w-full sm:h-[560px] xl:h-[680px]"
-                />
-              </CardContent>
-            </Card>
-
-            <div className="min-h-0">
-              <SimulatorJavaHarness bridge={bridge} />
-            </div>
+          <div className="min-h-0 flex-1">
+            <SimulatorJavaHarness
+              bridge={bridge}
+              editorHeight={editorHeight}
+              onEditorResizeStart={startEditorResize}
+              gamepadState={gamepadState}
+            />
           </div>
+        </section>
 
-          <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)_minmax(0,1fr)]">
-            <div className="flex flex-col gap-4">
-              <Card className="border-slate-800 bg-slate-950/80 text-slate-100 shadow-none">
-                <CardHeader>
-                  <CardTitle className="text-xl text-white">Controls</CardTitle>
-                  <CardDescription className="text-slate-400">
-                    Buttons dispatch simulator actions and drive commands. The renderer only reads
-                    the updated state.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="grid grid-cols-2 gap-3">
-                  <Button className="col-span-1" onClick={() => bridge.run()}>
-                    Run
-                  </Button>
-                  <Button variant="secondary" className="col-span-1" onClick={() => bridge.reset()}>
-                    Reset
-                  </Button>
-                  <Button variant="outline" className="bg-slate-900 text-slate-100" onClick={() => bridge.openClaw()}>
-                    Open Claw
-                  </Button>
-                  <Button variant="outline" className="bg-slate-900 text-slate-100" onClick={() => bridge.closeClaw()}>
-                    Close Claw
-                  </Button>
-                  <Button variant="outline" className="bg-slate-900 text-slate-100" onClick={() => bridge.armUp()}>
-                    Arm Up
-                  </Button>
-                  <Button variant="outline" className="bg-slate-900 text-slate-100" onClick={() => bridge.armDown()}>
-                    Arm Down
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="bg-slate-900 text-slate-100"
-                    onClick={() => {
-                      bridge.setMotorPower("leftFront", 0.8);
-                      bridge.setMotorPower("rightFront", 0.8);
-                    }}
-                  >
-                    Drive Forward
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="bg-slate-900 text-slate-100"
-                    onClick={() => {
-                      bridge.setMotorPower("leftFront", -0.55);
-                      bridge.setMotorPower("rightFront", 0.55);
-                    }}
-                  >
-                    Turn Left
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="bg-slate-900 text-slate-100"
-                    onClick={() => {
-                      bridge.setMotorPower("leftFront", 0.55);
-                      bridge.setMotorPower("rightFront", -0.55);
-                    }}
-                  >
-                    Turn Right
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="bg-slate-900 text-slate-100"
-                    onClick={() => {
-                      bridge.setMotorPower("leftFront", 0);
-                      bridge.setMotorPower("rightFront", 0);
-                    }}
-                  >
-                    Stop Drive
-                  </Button>
-                </CardContent>
-              </Card>
-
-              <Card className="border-slate-800 bg-slate-950/80 text-slate-100 shadow-none">
-                <CardHeader>
-                  <CardTitle className="text-xl text-white">Bridge Notes</CardTitle>
-                  <CardDescription className="text-slate-400">
-                    Current extension points for future browser and CheerpJ FTC bridge work.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm text-slate-300">
-                  <p className="mb-0">
-                    `motor.setPower()` and target-position calls update simulator state, not mesh
-                    objects.
-                  </p>
-                  <p className="mb-0">
-                    `servo.setPosition()` maps to claw state and renders through the animation
-                    loop.
-                  </p>
-                  <p className="mb-0">
-                    `window.codeARobotSimulator` is exposed for future browser-side bridge code and
-                    debug testing.
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
-
-            <Card className="border-slate-800 bg-slate-950/80 text-slate-100 shadow-none">
-              <CardHeader>
-                <CardTitle className="text-xl text-white">Telemetry / Debug</CardTitle>
-                <CardDescription className="text-slate-400">
-                  Live simulator snapshot plus the latest FTC-style telemetry values from user
-                  code.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 font-mono text-sm">
-                  {snapshot.telemetry.map((entry) => (
-                    <div
-                      key={entry.label}
-                      className="flex items-center justify-between gap-4 border-b border-slate-800/70 pb-2 last:border-b-0 last:pb-0"
-                    >
-                      <span className="text-slate-400">{entry.label}</span>
-                      <span className="text-right text-slate-100">{entry.value}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 font-mono text-sm">
-                  <div className="mb-3 text-xs uppercase tracking-[0.22em] text-slate-500">
-                    OpMode Telemetry
-                  </div>
-                  {snapshot.runtimeTelemetry.length > 0 ? (
-                    <div className="space-y-2">
-                      {snapshot.runtimeTelemetry.map((entry) => (
-                        <div
-                          key={entry.caption}
-                          className="flex items-start justify-between gap-4 border-b border-slate-800/70 pb-2 last:border-b-0 last:pb-0"
-                        >
-                          <div>
-                            <div className="text-slate-100">{entry.caption}</div>
-                            <div className="text-xs text-slate-500">{entry.updatedAtLabel}</div>
-                          </div>
-                          <span className="text-right text-sky-200">{entry.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-slate-500">
-                      No opmode telemetry yet. Run Java code to populate this panel.
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-slate-800 bg-slate-950/80 text-slate-100 shadow-none">
-              <CardHeader>
-                <CardTitle className="text-xl text-white">Bridge Event Log</CardTitle>
-                <CardDescription className="text-slate-400">
-                  Recent bridge calls from UI controls and Java runtime code.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 font-mono text-xs sm:text-sm">
-                  {snapshot.telemetryLog.map((entry) => (
-                    <div
-                      key={entry.id}
-                      className="flex items-start justify-between gap-4 border-b border-slate-800/70 pb-2 last:border-b-0 last:pb-0"
-                    >
-                      <span className="text-slate-400">{entry.timestampLabel}</span>
-                      <span className="text-right text-slate-100">{entry.message}</span>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-slate-800 bg-slate-950/80 text-slate-100 shadow-none xl:col-start-3">
-              <CardHeader>
-                <CardTitle className="text-xl text-white">Telemetry History</CardTitle>
-                <CardDescription className="text-slate-400">
-                  Recent FTC telemetry updates emitted by Java user code.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 font-mono text-xs sm:text-sm">
-                  {snapshot.runtimeTelemetryHistory.length > 0 ? (
-                    snapshot.runtimeTelemetryHistory.map((entry) => (
-                      <div
-                        key={entry.id}
-                        className="flex items-start justify-between gap-4 border-b border-slate-800/70 pb-2 last:border-b-0 last:pb-0"
-                      >
-                        <span className="text-slate-400">{entry.timestampLabel}</span>
-                        <span className="text-right text-sky-200">{entry.message}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-slate-500">
-                      No telemetry history yet. This will fill as `telemetry.addData()` runs.
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+        <div
+          onPointerDown={startLeftResize}
+          className="group hidden w-4 cursor-col-resize items-center justify-center border-x border-white/10 bg-black xl:flex"
+          role="separator"
+          aria-orientation="vertical"
+        >
+          <div className="h-14 w-1 rounded-full bg-zinc-800 transition-colors group-hover:bg-zinc-600" />
         </div>
+
+        <section
+          className="flex min-h-[40vh] w-full min-w-0 flex-col border-b border-white/10 bg-[#030303] xl:min-h-[calc(100vh-4rem)] xl:w-auto xl:shrink-0 xl:border-b-0"
+          style={{ flexBasis: `${middlePaneWidth}%` }}
+        >
+          <div className="flex items-center justify-between border-b border-white/10 px-5 py-4 sm:px-6">
+            <p className="mb-0 text-[11px] uppercase tracking-[0.28em] text-zinc-500">
+              Controller
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-white/10 bg-transparent text-zinc-100 hover:bg-zinc-900"
+              onClick={clearGamepad}
+            >
+              Clear
+            </Button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-5">
+            <F310Gamepad
+              state={gamepadState}
+              onAxisChange={setGamepadAxisState}
+              onButtonChange={setGamepadButtonState}
+            />
+          </div>
+        </section>
+
+        <div
+          onPointerDown={startMiddleResize}
+          className="group hidden w-4 cursor-col-resize items-center justify-center border-x border-white/10 bg-black xl:flex"
+          role="separator"
+          aria-orientation="vertical"
+        >
+          <div className="h-14 w-1 rounded-full bg-zinc-800 transition-colors group-hover:bg-zinc-600" />
+        </div>
+
+        <section
+          ref={rightPaneRef}
+          className="flex min-h-[50vh] min-w-0 flex-1 flex-col bg-[#050505] xl:min-h-[calc(100vh-4rem)]"
+        >
+          <div className="border-b border-white/10 px-5 py-4 sm:px-6">
+            <p className="mb-1 text-[11px] uppercase tracking-[0.28em] text-zinc-500">
+              Simulator
+            </p>
+            <div className="flex flex-wrap gap-2 text-xs text-zinc-400">
+              <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1">
+                Arm {snapshot.armAngleDeg.toFixed(0)} deg
+              </span>
+              <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1">
+                Claw {snapshot.clawOpenAmount.toFixed(2)}
+              </span>
+              <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1">
+                {snapshot.elapsedSeconds.toFixed(1)}s
+              </span>
+            </div>
+          </div>
+
+          <div className="min-h-0">
+            <div className="relative min-h-[320px]" style={{ height: `${simulatorHeight}px` }}>
+              <div ref={mountRef} className="h-full w-full" />
+              <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-wrap gap-2 p-4 text-xs text-zinc-300">
+                <div className="rounded-full border border-white/10 bg-black/70 px-3 py-1 backdrop-blur">
+                  X {snapshot.robotX.toFixed(2)}
+                </div>
+                <div className="rounded-full border border-white/10 bg-black/70 px-3 py-1 backdrop-blur">
+                  Y {snapshot.robotY.toFixed(2)}
+                </div>
+                <div className="rounded-full border border-white/10 bg-black/70 px-3 py-1 backdrop-blur">
+                  Heading {snapshot.robotHeadingDeg.toFixed(0)} deg
+                </div>
+              </div>
+            </div>
+
+            <div
+              role="separator"
+              aria-orientation="horizontal"
+              onPointerDown={startSimulatorResize}
+              className="group flex h-4 cursor-row-resize items-center justify-center border-y border-white/10 bg-black"
+            >
+              <div className="h-1 w-14 rounded-full bg-zinc-800 transition-colors group-hover:bg-zinc-600" />
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   );

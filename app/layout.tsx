@@ -22,23 +22,29 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${geistSans.className} dark`} suppressHydrationWarning>
-      <body className="bg-background text-foreground">
+      <body className="bg-black text-white">
         <main className="min-h-screen">
-          <nav className="sticky top-0 z-50 border-b border-white/10 bg-slate-950/85 backdrop-blur">
-            <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-5 text-sm">
-              <div className="flex flex-col">
-                <Link href="/" className="text-lg font-semibold text-white">
+          <nav className="sticky top-0 z-50 border-b border-white/10 bg-black/90 backdrop-blur-xl">
+            <div className="flex h-16 w-full items-center justify-between px-5 text-sm">
+              <div className="flex items-center gap-3">
+                <Link
+                  href="/"
+                  className="rounded-full border border-white/10 bg-white px-3 py-1 text-xs font-medium uppercase tracking-[0.24em] text-black"
+                >
                   Simulator Studio
                 </Link>
-                <span className="text-xs text-slate-400">
-                  Standalone teacher builder and FTC simulator
-                </span>
               </div>
-              <div className="flex items-center gap-4 text-slate-300">
-                <Link href="/simulator-builder" className="hover:text-white">
+              <div className="flex items-center gap-2 text-zinc-400">
+                <Link
+                  href="/simulator-builder"
+                  className="rounded-full px-3 py-2 transition-colors hover:bg-white/5 hover:text-white"
+                >
                   Builder
                 </Link>
-                <Link href="/simulator-test" className="hover:text-white">
+                <Link
+                  href="/simulator-test"
+                  className="rounded-full px-3 py-2 transition-colors hover:bg-white/5 hover:text-white"
+                >
                   Simulator
                 </Link>
               </div>
