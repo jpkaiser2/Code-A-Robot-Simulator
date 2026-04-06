@@ -5,14 +5,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
-import { Button } from "@/components/ui/button";
 import F310Gamepad, { type F310State } from "@/components/simulator/F310Gamepad";
+import SimulatorStudioDriverStation, {
+  type StudioOpModeOption,
+} from "@/components/simulator/SimulatorStudioDriverStation";
 import {
   createSimulatorBridge,
   createSimulatorStore,
   type SimulatorBridge,
   type SimulatorState,
 } from "@/lib/simulator/mechanismSimulator";
+import type { SimulatorDriverStationModel } from "@/components/simulator/SimulatorJavaHarness";
 
 const SimulatorJavaHarness = dynamic(
   () => import("@/components/simulator/SimulatorJavaHarness"),
@@ -96,11 +99,22 @@ export default function SimulatorTestClient() {
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const rightPaneRef = useRef<HTMLElement | null>(null);
   const { bridge, snapshot, store } = useSimulatorSnapshot();
-  const [leftPaneWidth, setLeftPaneWidth] = useState(40);
-  const [middlePaneWidth, setMiddlePaneWidth] = useState(24);
+  const [leftPaneWidth, setLeftPaneWidth] = useState(34);
+  const [middlePaneWidth, setMiddlePaneWidth] = useState(22);
   const [editorHeight, setEditorHeight] = useState(520);
   const [simulatorHeight, setSimulatorHeight] = useState(520);
   const [gamepadState, setGamepadState] = useState<F310State>(() => createDefaultGamepadState());
+  const [driverStationModel, setDriverStationModel] = useState<SimulatorDriverStationModel>({
+    status: "loading",
+    awaitingStart: false,
+    isCompiling: false,
+    opModes: [] as StudioOpModeOption[],
+    selectedOpModeId: null,
+    onSelectOpModeId: () => {},
+    onInitialize: () => {},
+    onStart: () => {},
+    onStop: () => {},
+  });
 
   const startLeftResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!layoutRef.current) {
@@ -112,7 +126,7 @@ export default function SimulatorTestClient() {
 
     const handleMove = (moveEvent: PointerEvent) => {
       const nextWidth = ((moveEvent.clientX - bounds.left) / bounds.width) * 100;
-      setLeftPaneWidth(Math.min(58, Math.max(22, nextWidth)));
+      setLeftPaneWidth(Math.min(52, Math.max(18, nextWidth)));
     };
 
     const handleUp = () => {
@@ -134,8 +148,8 @@ export default function SimulatorTestClient() {
 
     const handleMove = (moveEvent: PointerEvent) => {
       const pointerWidth = ((moveEvent.clientX - bounds.left) / bounds.width) * 100;
-      const minBoundary = leftPaneWidth + 16;
-      const maxBoundary = 78;
+      const minBoundary = leftPaneWidth + 14;
+      const maxBoundary = 74;
       const clampedBoundary = Math.min(maxBoundary, Math.max(minBoundary, pointerWidth));
       setMiddlePaneWidth(clampedBoundary - leftPaneWidth);
     };
@@ -231,10 +245,6 @@ export default function SimulatorTestClient() {
     },
     []
   );
-
-  const clearGamepad = useCallback(() => {
-    setGamepadState(createDefaultGamepadState());
-  }, []);
 
   useEffect(() => {
     const container = mountRef.current;
@@ -495,29 +505,13 @@ export default function SimulatorTestClient() {
           className="flex min-h-[50vh] w-full min-w-0 flex-col border-b border-white/10 bg-black xl:min-h-[calc(100vh-4rem)] xl:w-auto xl:border-b-0 xl:shrink-0"
           style={{ flexBasis: `${leftPaneWidth}%` }}
         >
-          <div className="flex items-center justify-between border-b border-white/10 px-5 py-4 sm:px-6">
-            <div>
-              <p className="mb-1 text-[11px] uppercase tracking-[0.28em] text-zinc-500">
-                Simulator Test
-              </p>
-            </div>
-            <div
-              className={`rounded-full border px-3 py-1 text-xs font-medium ${
-                snapshot.status === "running"
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-                  : "border-white/10 bg-white/5 text-zinc-300"
-              }`}
-            >
-              {snapshot.status === "running" ? "Running" : "Ready"}
-            </div>
-          </div>
-
           <div className="min-h-0 flex-1">
             <SimulatorJavaHarness
               bridge={bridge}
               editorHeight={editorHeight}
               onEditorResizeStart={startEditorResize}
               gamepadState={gamepadState}
+              onDriverStationModelChange={setDriverStationModel}
             />
           </div>
         </section>
@@ -539,14 +533,6 @@ export default function SimulatorTestClient() {
             <p className="mb-0 text-[11px] uppercase tracking-[0.28em] text-zinc-500">
               Controller
             </p>
-            <Button
-              size="sm"
-              variant="outline"
-              className="border-white/10 bg-transparent text-zinc-100 hover:bg-zinc-900"
-              onClick={clearGamepad}
-            >
-              Clear
-            </Button>
           </div>
           <div className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-5">
             <F310Gamepad
@@ -570,23 +556,6 @@ export default function SimulatorTestClient() {
           ref={rightPaneRef}
           className="flex min-h-[50vh] min-w-0 flex-1 flex-col bg-[#050505] xl:min-h-[calc(100vh-4rem)]"
         >
-          <div className="border-b border-white/10 px-5 py-4 sm:px-6">
-            <p className="mb-1 text-[11px] uppercase tracking-[0.28em] text-zinc-500">
-              Simulator
-            </p>
-            <div className="flex flex-wrap gap-2 text-xs text-zinc-400">
-              <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1">
-                Arm {snapshot.armAngleDeg.toFixed(0)} deg
-              </span>
-              <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1">
-                Claw {snapshot.clawOpenAmount.toFixed(2)}
-              </span>
-              <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1">
-                {snapshot.elapsedSeconds.toFixed(1)}s
-              </span>
-            </div>
-          </div>
-
           <div className="min-h-0">
             <div className="relative min-h-[320px]" style={{ height: `${simulatorHeight}px` }}>
               <div ref={mountRef} className="h-full w-full" />
@@ -610,6 +579,27 @@ export default function SimulatorTestClient() {
               className="group flex h-4 cursor-row-resize items-center justify-center border-y border-white/10 bg-black"
             >
               <div className="h-1 w-14 rounded-full bg-zinc-800 transition-colors group-hover:bg-zinc-600" />
+            </div>
+
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-black">
+              <div className="border-b border-white/10 px-5 py-4 sm:px-6">
+                <p className="mb-0 text-[11px] uppercase tracking-[0.28em] text-zinc-500">
+                  Driver Station
+                </p>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto">
+                <SimulatorStudioDriverStation
+                  status={driverStationModel.status}
+                  awaitingStart={driverStationModel.awaitingStart}
+                  isCompiling={driverStationModel.isCompiling}
+                  opModes={driverStationModel.opModes}
+                  selectedOpModeId={driverStationModel.selectedOpModeId}
+                  onSelectOpModeId={driverStationModel.onSelectOpModeId}
+                  onInitialize={driverStationModel.onInitialize}
+                  onStart={driverStationModel.onStart}
+                  onStop={driverStationModel.onStop}
+                />
+              </div>
             </div>
           </div>
         </section>

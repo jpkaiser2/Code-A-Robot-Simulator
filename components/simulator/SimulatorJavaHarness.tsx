@@ -7,14 +7,28 @@ import "ace-builds/src-noconflict/theme-monokai";
 import "ace-builds/src-noconflict/ext-language_tools";
 
 import { Button } from "@/components/ui/button";
+import type { StudioOpModeOption } from "@/components/simulator/SimulatorStudioDriverStation";
 import type { F310State } from "@/components/simulator/F310Gamepad";
 import type { SimulatorBridge } from "@/lib/simulator/mechanismSimulator";
+
+export interface SimulatorDriverStationModel {
+  status: HarnessStatus;
+  awaitingStart: boolean;
+  isCompiling: boolean;
+  opModes: StudioOpModeOption[];
+  selectedOpModeId: string | null;
+  onSelectOpModeId: (opModeId: string) => void;
+  onInitialize: () => void;
+  onStart: () => void;
+  onStop: () => void;
+}
 
 interface SimulatorJavaHarnessProps {
   bridge: SimulatorBridge;
   editorHeight: number;
   onEditorResizeStart: (event: React.PointerEvent<HTMLDivElement>) => void;
   gamepadState: F310State;
+  onDriverStationModelChange?: (model: SimulatorDriverStationModel) => void;
 }
 
 type HarnessStatus = "loading" | "ready" | "running" | "error";
@@ -1021,11 +1035,15 @@ export default function SimulatorJavaHarness({
   editorHeight,
   onEditorResizeStart,
   gamepadState,
+  onDriverStationModelChange,
 }: SimulatorJavaHarnessProps) {
   const editorRef = useRef<any>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const consoleRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScrollConsoleRef = useRef(true);
   const [status, setStatus] = useState<HarnessStatus>("loading");
   const [awaitingStart, setAwaitingStart] = useState(false);
+  const [isCompiling, setIsCompiling] = useState(false);
   const [pendingRun, setPendingRun] = useState(false);
   const [files, setFiles] = useState<HarnessFile[]>(() => createAutonomousTemplate());
   const [activeFileId, setActiveFileId] = useState("1");
@@ -1088,6 +1106,7 @@ export default function SimulatorJavaHarness({
       switch (event.data.type) {
         case "sim-java-ready":
           setStatus("ready");
+          setIsCompiling(false);
           appendLog("Runtime ready.", "success");
           break;
         case "sim-java-log":
@@ -1096,11 +1115,13 @@ export default function SimulatorJavaHarness({
         case "sim-java-waiting-for-start":
           setStatus("ready");
           setAwaitingStart(true);
+          setIsCompiling(false);
           appendLog("Code loaded. Waiting for start.", "success");
           break;
         case "sim-java-started":
           setStatus("running");
           setAwaitingStart(false);
+          setIsCompiling(false);
           appendLog("Run started.", "success");
           break;
         case "sim-java-motor-power":
@@ -1179,12 +1200,14 @@ export default function SimulatorJavaHarness({
           setStatus("ready");
           setAwaitingStart(false);
           setPendingRun(false);
+          setIsCompiling(false);
           appendLog("Run complete.", "success");
           break;
         case "sim-java-error":
           setStatus("error");
           setAwaitingStart(false);
           setPendingRun(false);
+          setIsCompiling(false);
           appendLog(String(event.data.message), "error");
           break;
       }
@@ -1228,6 +1251,7 @@ export default function SimulatorJavaHarness({
     setStatus("running");
     setAwaitingStart(false);
     setPendingRun(false);
+    setIsCompiling(true);
     bridge.reset();
     appendLog(`Compiling and starting ${selectedOpMode.fileName}...`);
     iframeRef.current.contentWindow.postMessage(
@@ -1287,6 +1311,7 @@ export default function SimulatorJavaHarness({
 
     setAwaitingStart(false);
     setPendingRun(false);
+    setIsCompiling(false);
     appendLog("Stopping...");
     iframeRef.current.contentWindow.postMessage(
       {
@@ -1482,6 +1507,39 @@ export default function SimulatorJavaHarness({
     };
   }, [handleMouseMove, handleMouseUp]);
 
+  useEffect(() => {
+    const consoleElement = consoleRef.current;
+    if (!consoleElement) {
+      return;
+    }
+
+    const handleScroll = () => {
+      const distanceFromBottom =
+        consoleElement.scrollHeight - consoleElement.scrollTop - consoleElement.clientHeight;
+      shouldAutoScrollConsoleRef.current = distanceFromBottom < 24;
+    };
+
+    handleScroll();
+    consoleElement.addEventListener("scroll", handleScroll);
+
+    return () => {
+      consoleElement.removeEventListener("scroll", handleScroll);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!shouldAutoScrollConsoleRef.current) {
+      return;
+    }
+
+    const consoleElement = consoleRef.current;
+    if (!consoleElement) {
+      return;
+    }
+
+    consoleElement.scrollTop = consoleElement.scrollHeight;
+  }, [logEntries]);
+
   const statusLabel = useMemo(() => {
     switch (status) {
       case "loading":
@@ -1495,6 +1553,34 @@ export default function SimulatorJavaHarness({
     }
   }, [awaitingStart, status]);
 
+  useEffect(() => {
+    onDriverStationModelChange?.({
+      status,
+      awaitingStart,
+      isCompiling,
+      opModes: detectedOpModes.map((opMode) => ({
+        id: opMode.className,
+        fileName: opMode.fileName,
+        type: opMode.type,
+      })),
+      selectedOpModeId: selectedOpMode?.className ?? null,
+      onSelectOpModeId: setSelectedRunClassName,
+      onInitialize: runDemo,
+      onStart: startOpMode,
+      onStop: stopOpMode,
+    });
+  }, [
+    awaitingStart,
+    detectedOpModes,
+    isCompiling,
+    onDriverStationModelChange,
+    runDemo,
+    selectedOpMode,
+    startOpMode,
+    status,
+    stopOpMode,
+  ]);
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-none bg-[#1E1E1E] text-white">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-700 bg-[#1e1f1c] px-4 py-2">
@@ -1503,15 +1589,6 @@ export default function SimulatorJavaHarness({
           {isDirty[activeFileId] ? (
             <div className="text-sm text-yellow-400">• Modified</div>
           ) : null}
-          <span className="rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] uppercase tracking-[0.2em] text-zinc-500">
-            {selectedOpMode?.type === "teleop"
-              ? "TeleOp"
-              : selectedOpMode?.type === "autonomous"
-                ? "Auto"
-                : detectedOpModeType === "teleop"
-                  ? "TeleOp"
-                  : "Auto"}
-          </span>
           <span className="text-sm text-zinc-500">{statusLabel}</span>
         </div>
 
@@ -1522,7 +1599,7 @@ export default function SimulatorJavaHarness({
             onClick={loadAutonomousTemplate}
             className="bg-zinc-800 text-white hover:bg-zinc-700"
           >
-            Autonomous
+            Autonomous Template
           </Button>
           <Button
             size="sm"
@@ -1530,29 +1607,7 @@ export default function SimulatorJavaHarness({
             onClick={loadTeleOpTemplate}
             className="bg-zinc-800 text-white hover:bg-zinc-700"
           >
-            TeleOp
-          </Button>
-          <Button
-            onClick={runDemo}
-            disabled={status === "running"}
-            className="bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-600"
-          >
-            {status === "running" ? "Running..." : "Run Code"}
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={startOpMode}
-            disabled={!awaitingStart}
-            className="bg-zinc-800 text-white hover:bg-zinc-700 disabled:bg-zinc-900 disabled:text-zinc-500"
-          >
-            Start
-          </Button>
-          <Button
-            variant="outline"
-            onClick={stopOpMode}
-            className="border-gray-700 bg-transparent text-zinc-100 hover:bg-zinc-800"
-          >
-            Stop
+            TeleOp Template
           </Button>
           <Button
             variant="outline"
@@ -1581,23 +1636,6 @@ export default function SimulatorJavaHarness({
         title="Simulator Runtime"
         className="pointer-events-none absolute h-0 w-0 opacity-0"
       />
-
-      {detectedOpModes.length > 1 ? (
-        <div className="flex items-center justify-between gap-3 border-b border-gray-700 bg-[#161714] px-4 py-2">
-          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Run Target</div>
-          <select
-            value={selectedOpMode?.className ?? ""}
-            onChange={(event) => setSelectedRunClassName(event.target.value)}
-            className="rounded border border-gray-700 bg-[#1e1f1c] px-3 py-1.5 text-sm text-zinc-100 outline-none"
-          >
-            {detectedOpModes.map((opMode) => (
-              <option key={opMode.className} value={opMode.className}>
-                {opMode.type === "teleop" ? "TeleOp" : "Autonomous"}: {opMode.fileName}
-              </option>
-            ))}
-          </select>
-        </div>
-      ) : null}
 
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex flex-wrap border-b border-gray-700 bg-[#1e1f1c]">
@@ -1713,7 +1751,10 @@ export default function SimulatorJavaHarness({
             </div>
           </div>
 
-          <div className="h-28 overflow-auto bg-[#272822] p-4 font-mono text-sm whitespace-pre-wrap">
+          <div
+            ref={consoleRef}
+            className="h-28 overflow-auto bg-[#272822] p-4 font-mono text-sm whitespace-pre-wrap"
+          >
             {logEntries.length === 0 ? (
               <div className="text-zinc-500">Console cleared.</div>
             ) : (
