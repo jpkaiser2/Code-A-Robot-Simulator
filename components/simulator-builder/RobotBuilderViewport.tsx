@@ -6,6 +6,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 
 import type {
+  JointDefinition,
   PrimitiveKind,
   RobotDefinition,
   RobotPart,
@@ -17,8 +18,14 @@ interface RobotBuilderViewportProps {
   robot: RobotDefinition;
   selectedPartId: string | null;
   transformMode: TransformMode;
+  jointPreviewValues: Record<string, number>;
   onSelectPart: (partId: string | null) => void;
   onPartTransform: (partId: string, transform: Pick<RobotPart, "position" | "rotation" | "scale">) => void;
+}
+
+interface ViewportPartObject {
+  previewGroup: THREE.Group;
+  authoredGroup: THREE.Group;
 }
 
 function disposeObject3D(object: THREE.Object3D) {
@@ -54,6 +61,12 @@ function toRadians(rotation: Vec3): Vec3 {
   return rotation.map((axis) => THREE.MathUtils.degToRad(axis)) as Vec3;
 }
 
+function toAxis(axis: Vec3 | undefined, fallback: Vec3) {
+  const value = axis ?? fallback;
+  const vector = new THREE.Vector3(...value);
+  return vector.lengthSq() > 0 ? vector.normalize() : new THREE.Vector3(...fallback).normalize();
+}
+
 function fromObjectTransform(object: THREE.Object3D): Pick<RobotPart, "position" | "rotation" | "scale"> {
   return {
     position: [
@@ -74,14 +87,97 @@ function fromObjectTransform(object: THREE.Object3D): Pick<RobotPart, "position"
   };
 }
 
-function createPartObject(part: RobotPart, selectedPartId: string | null) {
-  const object = new THREE.Group();
-  object.name = part.name;
-  object.userData.partId = part.id;
-  object.position.set(...part.position);
-  object.rotation.set(...toRadians(part.rotation));
-  object.scale.set(...part.scale);
-  object.visible = part.visible;
+function applyJointPreview(previewGroup: THREE.Group, joint: JointDefinition, value: number) {
+  if (joint.type === "fixed") {
+    return;
+  }
+
+  if (joint.type === "prismatic") {
+    const axis = toAxis(joint.axis, [1, 0, 0]);
+    previewGroup.position.copy(axis.multiplyScalar(value));
+    return;
+  }
+
+  const axis = toAxis(joint.axis, [0, 0, 1]);
+  const pivot = new THREE.Vector3(...(joint.pivot ?? [0, 0, 0]));
+  const angle = THREE.MathUtils.degToRad(value);
+  const rotation = new THREE.Quaternion().setFromAxisAngle(axis, angle);
+  const rotatedPivot = pivot.clone().applyQuaternion(rotation);
+  previewGroup.quaternion.copy(rotation);
+  previewGroup.position.copy(pivot.sub(rotatedPivot));
+}
+
+function addMountPointHelpers(authoredGroup: THREE.Group, part: RobotPart) {
+  part.mountPoints.forEach((mountPoint) => {
+    const helper = new THREE.Mesh(
+      new THREE.SphereGeometry(0.08, 16, 8),
+      new THREE.MeshBasicMaterial({ color: "#38bdf8", depthTest: false })
+    );
+    helper.position.set(...mountPoint.position);
+    helper.rotation.set(...toRadians(mountPoint.rotation));
+    helper.renderOrder = 4;
+    helper.userData.partId = part.id;
+
+    const axes = new THREE.AxesHelper(0.28);
+    axes.userData.partId = part.id;
+    helper.add(axes);
+    authoredGroup.add(helper);
+  });
+}
+
+function addJointHelper(previewGroup: THREE.Group, part: RobotPart) {
+  if (part.joint.type === "fixed") {
+    return;
+  }
+
+  const axis = toAxis(part.joint.axis, part.joint.type === "revolute" ? [0, 0, 1] : [1, 0, 0]);
+  const pivot = new THREE.Vector3(...(part.joint.pivot ?? [0, 0, 0]));
+  const points = [
+    pivot.clone().add(axis.clone().multiplyScalar(-0.55)),
+    pivot.clone().add(axis.clone().multiplyScalar(0.55)),
+  ];
+  const axisLine = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(points),
+    new THREE.LineBasicMaterial({
+      color: part.joint.type === "revolute" ? "#f97316" : "#22c55e",
+      depthTest: false,
+    })
+  );
+  axisLine.renderOrder = 5;
+  axisLine.userData.partId = part.id;
+  previewGroup.add(axisLine);
+
+  if (part.joint.type === "revolute") {
+    const pivotMarker = new THREE.Mesh(
+      new THREE.TorusGeometry(0.22, 0.01, 8, 32),
+      new THREE.MeshBasicMaterial({ color: "#f97316", depthTest: false })
+    );
+    pivotMarker.position.copy(pivot);
+    pivotMarker.renderOrder = 5;
+    pivotMarker.userData.partId = part.id;
+    previewGroup.add(pivotMarker);
+  }
+}
+
+function createPartObject(
+  part: RobotPart,
+  selectedPartId: string | null,
+  jointPreviewValues: Record<string, number>
+): ViewportPartObject {
+  const previewGroup = new THREE.Group();
+  previewGroup.name = `${part.name} joint preview`;
+  previewGroup.userData.partId = part.id;
+  previewGroup.visible = part.visible;
+  applyJointPreview(previewGroup, part.joint, jointPreviewValues[part.id] ?? part.joint.initialValue ?? 0);
+
+  const authoredGroup = new THREE.Group();
+  authoredGroup.name = part.name;
+  authoredGroup.userData.partId = part.id;
+  authoredGroup.position.set(...part.position);
+  authoredGroup.rotation.set(...toRadians(part.rotation));
+  authoredGroup.scale.set(...part.scale);
+  authoredGroup.visible = part.visible;
+  previewGroup.add(authoredGroup);
 
   const isSelected = selectedPartId === part.id;
   const geometry = createGeometry(part.kind);
@@ -96,7 +192,7 @@ function createPartObject(part: RobotPart, selectedPartId: string | null) {
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   mesh.userData.partId = part.id;
-  object.add(mesh);
+  authoredGroup.add(mesh);
 
   if (isSelected) {
     const edges = new THREE.LineSegments(
@@ -104,16 +200,19 @@ function createPartObject(part: RobotPart, selectedPartId: string | null) {
       new THREE.LineBasicMaterial({ color: "#ffffff" })
     );
     edges.userData.partId = part.id;
-    object.add(edges);
+    authoredGroup.add(edges);
+    addMountPointHelpers(authoredGroup, part);
+    addJointHelper(previewGroup, part);
   }
 
-  return object;
+  return { previewGroup, authoredGroup };
 }
 
 export default function RobotBuilderViewport({
   robot,
   selectedPartId,
   transformMode,
+  jointPreviewValues,
   onSelectPart,
   onPartTransform,
 }: RobotBuilderViewportProps) {
@@ -291,13 +390,16 @@ export default function RobotBuilderViewport({
     }
 
     const objectMap = new Map<string, THREE.Object3D>();
+    const authoredMap = new Map<string, THREE.Object3D>();
     robot.parts.forEach((part) => {
-      objectMap.set(part.id, createPartObject(part, selectedPartId));
+      const object = createPartObject(part, selectedPartId, jointPreviewValues);
+      objectMap.set(part.id, object.previewGroup);
+      authoredMap.set(part.id, object.authoredGroup);
     });
 
     robot.parts.forEach((part) => {
       const object = objectMap.get(part.id);
-      const parent = part.parentId ? objectMap.get(part.parentId) : null;
+      const parent = part.parentId ? authoredMap.get(part.parentId) : null;
       if (!object) {
         return;
       }
@@ -308,16 +410,16 @@ export default function RobotBuilderViewport({
       }
     });
 
-    partObjectsRef.current = objectMap;
+    partObjectsRef.current = authoredMap;
 
     const transformControls = transformControlsRef.current;
-    const selectedObject = selectedPartId ? objectMap.get(selectedPartId) : null;
+    const selectedObject = selectedPartId ? authoredMap.get(selectedPartId) : null;
     if (transformControls && selectedObject) {
       transformControls.attach(selectedObject);
     } else {
       transformControls?.detach();
     }
-  }, [robot, selectedPartId]);
+  }, [jointPreviewValues, robot, selectedPartId]);
 
   useEffect(() => {
     transformControlsRef.current?.setMode(transformMode);

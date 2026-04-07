@@ -4,6 +4,27 @@ export type Vec3 = [number, number, number];
 
 export type TransformMode = "translate" | "rotate" | "scale";
 
+export type JointType = "fixed" | "revolute" | "prismatic";
+
+export interface MountPoint {
+  id: string;
+  name: string;
+  position: Vec3;
+  rotation: Vec3;
+  tags?: string[];
+}
+
+export interface JointDefinition {
+  type: JointType;
+  pivot?: Vec3;
+  axis?: Vec3;
+  limits?: {
+    min: number;
+    max: number;
+  };
+  initialValue?: number;
+}
+
 export interface RobotPart {
   id: string;
   name: string;
@@ -14,8 +35,10 @@ export interface RobotPart {
   scale: Vec3;
   color: string;
   visible: boolean;
-  // Future extension points: joints, hardware bindings, mount points, sensors,
-  // drivetrain config, and imported mesh asset references should attach here.
+  mountPoints: MountPoint[];
+  joint: JointDefinition;
+  // Future extension points: hardware bindings, sensors, imported mesh asset
+  // references, and runtime simulator mappings should attach here.
 }
 
 export interface RobotDefinition {
@@ -31,6 +54,7 @@ export interface BuilderEditorState {
   robot: RobotDefinition;
   selectedPartId: string | null;
   transformMode: TransformMode;
+  jointPreviewValues: Record<string, number>;
 }
 
 export const PRIMITIVE_KINDS: PrimitiveKind[] = ["box", "cylinder", "sphere", "capsule"];
@@ -41,6 +65,24 @@ const DEFAULT_PART_COLORS: Record<PrimitiveKind, string> = {
   sphere: "#14b8a6",
   capsule: "#ec4899",
 };
+
+const DEFAULT_JOINT: JointDefinition = {
+  type: "fixed",
+};
+
+export function createMountPointId() {
+  return `mount-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export function createMountPoint(existingMountPoints: MountPoint[]): MountPoint {
+  return {
+    id: createMountPointId(),
+    name: `Mount ${existingMountPoints.length + 1}`,
+    position: [0, 0.5, 0],
+    rotation: [0, 0, 0],
+    tags: [],
+  };
+}
 
 export function createPartId(kind: PrimitiveKind) {
   return `${kind}-${Math.random().toString(36).slice(2, 10)}`;
@@ -61,6 +103,8 @@ export function createRobotPart(kind: PrimitiveKind, existingParts: RobotPart[])
     scale: [1, 1, 1],
     color: DEFAULT_PART_COLORS[kind],
     visible: true,
+    mountPoints: [],
+    joint: DEFAULT_JOINT,
   };
 }
 
@@ -75,10 +119,20 @@ export function createDefaultRobotDefinition(): RobotDefinition {
     scale: [2.6, 0.35, 1.8],
     color: "#2563eb",
     visible: true,
+    mountPoints: [
+      {
+        id: "mount-top-center",
+        name: "Top Center",
+        position: [0, 0.5, 0],
+        rotation: [0, 0, 0],
+        tags: ["structure", "default"],
+      },
+    ],
+    joint: DEFAULT_JOINT,
   };
 
   return {
-    version: 1,
+    version: 2,
     name: "Primitive Lesson Robot",
     rootPartIds: [chassis.id],
     parts: [chassis],
@@ -97,8 +151,100 @@ function normalizeVec3(value: unknown, fallback: Vec3): Vec3 {
   return isVec3(value) ? value : fallback;
 }
 
+export function normalizeVec3Axis(value: unknown, fallback: Vec3 = [0, 1, 0]): Vec3 {
+  const axis = normalizeVec3(value, fallback);
+  const length = Math.hypot(axis[0], axis[1], axis[2]);
+  if (length === 0) {
+    return fallback;
+  }
+  return [
+    Number((axis[0] / length).toFixed(4)),
+    Number((axis[1] / length).toFixed(4)),
+    Number((axis[2] / length).toFixed(4)),
+  ];
+}
+
 function isPrimitiveKind(value: unknown): value is PrimitiveKind {
   return typeof value === "string" && PRIMITIVE_KINDS.includes(value as PrimitiveKind);
+}
+
+function isJointType(value: unknown): value is JointType {
+  return value === "fixed" || value === "revolute" || value === "prismatic";
+}
+
+function normalizeMountPoints(value: unknown): MountPoint[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seenIds = new Set<string>();
+  return value
+    .filter((entry): entry is Partial<MountPoint> => Boolean(entry) && typeof entry === "object")
+    .map((entry, index) => {
+      const id =
+        typeof entry.id === "string" && entry.id.trim() && !seenIds.has(entry.id)
+          ? entry.id
+          : `mount-${index + 1}`;
+      seenIds.add(id);
+
+      return {
+        id,
+        name:
+          typeof entry.name === "string" && entry.name.trim()
+            ? entry.name
+            : `Mount ${index + 1}`,
+        position: normalizeVec3(entry.position, [0, 0.5, 0]),
+        rotation: normalizeVec3(entry.rotation, [0, 0, 0]),
+        tags: Array.isArray(entry.tags)
+          ? entry.tags.filter((tag): tag is string => typeof tag === "string")
+          : [],
+      };
+    });
+}
+
+function normalizeJoint(value: unknown): JointDefinition {
+  if (!value || typeof value !== "object") {
+    return DEFAULT_JOINT;
+  }
+
+  const candidate = value as Partial<JointDefinition>;
+  if (!isJointType(candidate.type) || candidate.type === "fixed") {
+    return DEFAULT_JOINT;
+  }
+
+  const limits =
+    candidate.limits &&
+    typeof candidate.limits === "object" &&
+    Number.isFinite(candidate.limits.min) &&
+    Number.isFinite(candidate.limits.max)
+      ? {
+          min: Math.min(candidate.limits.min, candidate.limits.max),
+          max: Math.max(candidate.limits.min, candidate.limits.max),
+        }
+      : candidate.type === "revolute"
+        ? { min: -90, max: 90 }
+        : { min: 0, max: 1 };
+  const initialValue =
+    typeof candidate.initialValue === "number" && Number.isFinite(candidate.initialValue)
+      ? Math.min(limits.max, Math.max(limits.min, candidate.initialValue))
+      : 0;
+
+  if (candidate.type === "revolute") {
+    return {
+      type: "revolute",
+      pivot: normalizeVec3(candidate.pivot, [0, 0, 0]),
+      axis: normalizeVec3Axis(candidate.axis, [0, 0, 1]),
+      limits,
+      initialValue,
+    };
+  }
+
+  return {
+    type: "prismatic",
+    axis: normalizeVec3Axis(candidate.axis, [1, 0, 0]),
+    limits,
+    initialValue,
+  };
 }
 
 function breakParentCycles(parts: RobotPart[]) {
@@ -163,6 +309,8 @@ export function normalizeRobotDefinition(value: unknown): RobotDefinition {
           ? part.color
           : DEFAULT_PART_COLORS[part.kind],
       visible: typeof part.visible === "boolean" ? part.visible : true,
+      mountPoints: normalizeMountPoints(part.mountPoints),
+      joint: normalizeJoint(part.joint),
     };
   });
 
@@ -183,7 +331,7 @@ export function normalizeRobotDefinition(value: unknown): RobotDefinition {
       : normalizedParts.map((part, index) => (index === 0 ? { ...part, parentId: null } : part));
 
   return {
-    version: typeof candidate.version === "number" ? candidate.version : 1,
+    version: Math.max(2, typeof candidate.version === "number" ? candidate.version : 2),
     name:
       typeof candidate.name === "string" && candidate.name.trim()
         ? candidate.name

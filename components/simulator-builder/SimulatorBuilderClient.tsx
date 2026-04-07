@@ -18,6 +18,9 @@ import {
   PRIMITIVE_KINDS,
   normalizeRobotDefinition,
   serializeRobotDefinition,
+  type JointDefinition,
+  type JointType,
+  type MountPoint,
   type PrimitiveKind,
   type RobotPart,
   type TransformMode,
@@ -25,6 +28,7 @@ import {
 } from "@/lib/simulator/builder/robotSchema";
 
 const TRANSFORM_MODES: TransformMode[] = ["translate", "rotate", "scale"];
+const JOINT_TYPES: JointType[] = ["fixed", "revolute", "prismatic"];
 
 function toTitleCase(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
@@ -39,6 +43,38 @@ function updateVec3(vec: Vec3, index: number, value: string): Vec3 {
   const next = [...vec] as Vec3;
   next[index] = parseNumber(value, vec[index]);
   return next;
+}
+
+function toTagText(tags: string[] | undefined) {
+  return tags?.join(", ") ?? "";
+}
+
+function fromTagText(value: string) {
+  return value
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+function createJointForType(type: JointType): JointDefinition {
+  if (type === "revolute") {
+    return {
+      type,
+      pivot: [0, 0, 0],
+      axis: [0, 0, 1],
+      limits: { min: -90, max: 90 },
+      initialValue: 0,
+    };
+  }
+  if (type === "prismatic") {
+    return {
+      type,
+      axis: [1, 0, 0],
+      limits: { min: 0, max: 1 },
+      initialValue: 0,
+    };
+  }
+  return { type: "fixed" };
 }
 
 function getDescendantPartIds(parts: RobotPart[], partId: string) {
@@ -84,6 +120,208 @@ function VectorEditor({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function MountPointEditor({
+  mountPoint,
+  onChange,
+  onRemove,
+}: {
+  mountPoint: MountPoint;
+  onChange: (mountPoint: MountPoint) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="space-y-3 rounded-2xl border border-white/10 bg-black p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium text-white">{mountPoint.name}</div>
+          <div className="font-mono text-xs text-zinc-500">{mountPoint.id}</div>
+        </div>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-400 hover:border-white/20 hover:text-white"
+        >
+          Remove
+        </button>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1">
+          <label className="text-xs uppercase text-zinc-500">Id</label>
+          <Input
+            value={mountPoint.id}
+            onChange={(event) => onChange({ ...mountPoint, id: event.target.value })}
+            className="border-white/10 bg-[#050505] font-mono text-zinc-100"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs uppercase text-zinc-500">Name</label>
+          <Input
+            value={mountPoint.name}
+            onChange={(event) => onChange({ ...mountPoint, name: event.target.value })}
+            className="border-white/10 bg-[#050505] text-zinc-100"
+          />
+        </div>
+      </div>
+      <VectorEditor
+        label="Mount Local Position"
+        value={mountPoint.position}
+        step="0.1"
+        onChange={(position) => onChange({ ...mountPoint, position })}
+      />
+      <VectorEditor
+        label="Mount Local Rotation"
+        value={mountPoint.rotation}
+        step="5"
+        onChange={(rotation) => onChange({ ...mountPoint, rotation })}
+      />
+      <div className="space-y-1">
+        <label className="text-xs uppercase text-zinc-500">Tags</label>
+        <Input
+          value={toTagText(mountPoint.tags)}
+          onChange={(event) => onChange({ ...mountPoint, tags: fromTagText(event.target.value) })}
+          placeholder="structure, arm, sensor"
+          className="border-white/10 bg-[#050505] text-zinc-100"
+        />
+      </div>
+    </div>
+  );
+}
+
+function JointEditor({
+  part,
+  previewValue,
+  onJointChange,
+  onPreviewChange,
+  onPreviewReset,
+}: {
+  part: RobotPart;
+  previewValue: number;
+  onJointChange: (joint: JointDefinition) => void;
+  onPreviewChange: (value: number) => void;
+  onPreviewReset: () => void;
+}) {
+  const joint = part.joint;
+  const limits = joint.limits ?? { min: 0, max: 0 };
+
+  return (
+    <div className="space-y-4 rounded-2xl border border-white/10 bg-black p-4">
+      <div className="space-y-2">
+        <label className="text-sm text-zinc-300">Joint type relative to parent</label>
+        <select
+          value={joint.type}
+          onChange={(event) => onJointChange(createJointForType(event.target.value as JointType))}
+          className="flex h-10 w-full rounded-md border border-white/10 bg-[#050505] px-3 py-2 text-sm text-zinc-100"
+        >
+          {JOINT_TYPES.map((type) => (
+            <option key={type} value={type}>
+              {toTitleCase(type)}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {joint.type !== "fixed" ? (
+        <>
+          {joint.type === "revolute" ? (
+            <VectorEditor
+              label="Joint Pivot"
+              value={joint.pivot ?? [0, 0, 0]}
+              step="0.1"
+              onChange={(pivot) => onJointChange({ ...joint, pivot })}
+            />
+          ) : null}
+          <VectorEditor
+            label="Joint Axis"
+            value={joint.axis ?? (joint.type === "revolute" ? [0, 0, 1] : [1, 0, 0])}
+            step="0.1"
+            onChange={(axis) => onJointChange({ ...joint, axis })}
+          />
+          <div className="grid grid-cols-3 gap-2">
+            <div className="space-y-1">
+              <label className="text-xs uppercase text-zinc-500">Min</label>
+              <Input
+                type="number"
+                step={joint.type === "revolute" ? "1" : "0.05"}
+                value={limits.min}
+                onChange={(event) =>
+                  onJointChange({
+                    ...joint,
+                    limits: { min: parseNumber(event.target.value, limits.min), max: limits.max },
+                  })
+                }
+                className="border-white/10 bg-[#050505] text-zinc-100"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs uppercase text-zinc-500">Max</label>
+              <Input
+                type="number"
+                step={joint.type === "revolute" ? "1" : "0.05"}
+                value={limits.max}
+                onChange={(event) =>
+                  onJointChange({
+                    ...joint,
+                    limits: { min: limits.min, max: parseNumber(event.target.value, limits.max) },
+                  })
+                }
+                className="border-white/10 bg-[#050505] text-zinc-100"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs uppercase text-zinc-500">Initial</label>
+              <Input
+                type="number"
+                step={joint.type === "revolute" ? "1" : "0.05"}
+                value={joint.initialValue ?? 0}
+                onChange={(event) =>
+                  onJointChange({
+                    ...joint,
+                    initialValue: parseNumber(event.target.value, joint.initialValue ?? 0),
+                  })
+                }
+                className="border-white/10 bg-[#050505] text-zinc-100"
+              />
+            </div>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-[#050505] p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-xs uppercase tracking-[0.22em] text-zinc-500">
+                  Preview {joint.type === "revolute" ? "Angle" : "Offset"}
+                </div>
+                <div className="mt-1 font-mono text-sm text-zinc-200">{previewValue}</div>
+              </div>
+              <button
+                type="button"
+                onClick={onPreviewReset}
+                className="rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-400 hover:border-white/20 hover:text-white"
+              >
+                Reset
+              </button>
+            </div>
+            <input
+              type="range"
+              min={limits.min}
+              max={limits.max}
+              step={joint.type === "revolute" ? 1 : 0.01}
+              value={previewValue}
+              onChange={(event) => onPreviewChange(Number(event.target.value))}
+              className="w-full"
+            />
+            <div className="mt-2 text-xs text-zinc-500">
+              Preview is temporary editor state and does not overwrite the authored local transform.
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="rounded-xl border border-white/10 bg-[#050505] px-3 py-2 text-sm text-zinc-400">
+          Fixed joints keep this part rigidly attached to its parent.
+        </div>
+      )}
     </div>
   );
 }
@@ -156,8 +394,14 @@ export default function SimulatorBuilderClient() {
   const [importText, setImportText] = useState("");
   const [jsonStatus, setJsonStatus] = useState<string | null>(null);
 
-  const { robot, selectedPartId, transformMode } = state;
+  const { robot, selectedPartId, transformMode, jointPreviewValues } = state;
   const selectedPart = robot.parts.find((part) => part.id === selectedPartId) ?? null;
+  const selectedParentPart = selectedPart?.parentId
+    ? robot.parts.find((part) => part.id === selectedPart.parentId) ?? null
+    : null;
+  const selectedJointPreviewValue = selectedPart
+    ? jointPreviewValues[selectedPart.id] ?? selectedPart.joint.initialValue ?? 0
+    : 0;
   const exportedJson = useMemo(() => serializeRobotDefinition(robot), [robot]);
   const childrenByParent = useMemo(() => {
     const groups = new Map<string | null, RobotPart[]>();
@@ -315,6 +559,7 @@ export default function SimulatorBuilderClient() {
                   robot={robot}
                   selectedPartId={selectedPartId}
                   transformMode={transformMode}
+                  jointPreviewValues={jointPreviewValues}
                   onSelectPart={selectPart}
                   onPartTransform={updateViewportTransform}
                 />
@@ -416,10 +661,7 @@ export default function SimulatorBuilderClient() {
                       <select
                         value={selectedPart.parentId ?? ""}
                         onChange={(event) =>
-                          updateSelectedPart((part) => ({
-                            ...part,
-                            parentId: event.target.value || null,
-                          }))
+                          actions.reparentPart(selectedPart.id, event.target.value || null)
                         }
                         className="flex h-10 w-full rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-zinc-100"
                       >
@@ -435,21 +677,65 @@ export default function SimulatorBuilderClient() {
                             </option>
                           ))}
                       </select>
+                      <p className="text-xs text-zinc-500">
+                        Position, rotation, scale, mount points, and joint fields below are local to
+                        this part&apos;s parent.
+                      </p>
                     </div>
+                    {selectedParentPart ? (
+                      <div className="space-y-3 rounded-2xl border border-white/10 bg-black p-4">
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.22em] text-zinc-500">
+                            Attach To Parent Mount
+                          </div>
+                          <div className="mt-1 text-sm text-zinc-400">
+                            Align this child to one of {selectedParentPart.name}&apos;s local mount
+                            points.
+                          </div>
+                        </div>
+                        {selectedParentPart.mountPoints.length > 0 ? (
+                          <div className="grid gap-2">
+                            {selectedParentPart.mountPoints.map((mountPoint) => (
+                              <button
+                                key={mountPoint.id}
+                                type="button"
+                                onClick={() =>
+                                  actions.attachPartToMount(
+                                    selectedPart.id,
+                                    selectedParentPart.id,
+                                    mountPoint.id
+                                  )
+                                }
+                                className="rounded-xl border border-white/10 bg-[#050505] px-3 py-2 text-left text-sm text-zinc-300 hover:border-white/20 hover:text-white"
+                              >
+                                <span className="font-medium text-white">{mountPoint.name}</span>
+                                <span className="ml-2 font-mono text-xs text-zinc-500">
+                                  {mountPoint.id}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="rounded-xl border border-dashed border-white/10 bg-[#050505] px-3 py-2 text-sm text-zinc-500">
+                            The parent does not have mount points yet.
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
                     <VectorEditor
-                      label="Position"
+                      label="Local Position"
                       value={selectedPart.position}
                       step="0.1"
                       onChange={(position) => updateSelectedPart((part) => ({ ...part, position }))}
                     />
                     <VectorEditor
-                      label="Rotation"
+                      label="Local Rotation"
                       value={selectedPart.rotation}
                       step="5"
                       onChange={(rotation) => updateSelectedPart((part) => ({ ...part, rotation }))}
                     />
                     <VectorEditor
-                      label="Scale"
+                      label="Local Scale"
                       value={selectedPart.scale}
                       step="0.05"
                       onChange={(scale) => updateSelectedPart((part) => ({ ...part, scale }))}
@@ -464,6 +750,60 @@ export default function SimulatorBuilderClient() {
                       />
                       Visible in viewport
                     </label>
+                    <div className="space-y-3 rounded-2xl border border-white/10 bg-black p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.22em] text-zinc-500">
+                            Mount Points
+                          </div>
+                          <div className="mt-1 text-sm text-zinc-400">
+                            Named local attachment points for child parts.
+                          </div>
+                        </div>
+                        <Button
+                          type="button"
+                          onClick={() => actions.addMountPoint(selectedPart.id)}
+                          className="border border-white/10 bg-white text-black hover:bg-zinc-200"
+                        >
+                          Add Mount
+                        </Button>
+                      </div>
+                      {selectedPart.mountPoints.length > 0 ? (
+                        selectedPart.mountPoints.map((mountPoint) => (
+                          <MountPointEditor
+                            key={mountPoint.id}
+                            mountPoint={mountPoint}
+                            onChange={(nextMountPoint) =>
+                              actions.updateMountPoint(selectedPart.id, mountPoint.id, () => nextMountPoint)
+                            }
+                            onRemove={() => actions.removeMountPoint(selectedPart.id, mountPoint.id)}
+                          />
+                        ))
+                      ) : (
+                        <div className="rounded-xl border border-dashed border-white/10 bg-[#050505] px-3 py-2 text-sm text-zinc-500">
+                          No mount points on this part yet.
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-3">
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.22em] text-zinc-500">
+                          Joint
+                        </div>
+                        <div className="mt-1 text-sm text-zinc-400">
+                          Explicit mechanism metadata relative to this part&apos;s parent.
+                        </div>
+                      </div>
+                      <JointEditor
+                        part={selectedPart}
+                        previewValue={selectedJointPreviewValue}
+                        onJointChange={(joint) => actions.updateJoint(selectedPart.id, () => joint)}
+                        onPreviewChange={(value) =>
+                          actions.setJointPreviewValue(selectedPart.id, value)
+                        }
+                        onPreviewReset={() => actions.resetJointPreview(selectedPart.id)}
+                      />
+                    </div>
                   </>
                 ) : (
                   <div className="rounded-2xl border border-dashed border-white/10 bg-black p-8 text-center text-zinc-500">
