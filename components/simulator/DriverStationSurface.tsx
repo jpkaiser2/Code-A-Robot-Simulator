@@ -201,7 +201,7 @@ export default function DriverStationSurface({
                 style={{ gap: scaled(16), paddingInline: scaled(16), fontSize: scaled(14) }}
               >
                 <div className="leading-tight text-white">
-                  <div className="font-semibold">Network: 9999-A-RC</div>
+                  <div className="font-semibold">Network: 24213-RC</div>
                   <div className="font-semibold">Ping: 3ms - ch 1</div>
                 </div>
 

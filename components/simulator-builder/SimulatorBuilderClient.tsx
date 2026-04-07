@@ -1,18 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import {
-  DndContext,
-  PointerSensor,
-  closestCenter,
-  useDraggable,
-  useDroppable,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
-import { CSS } from "@dnd-kit/utilities";
+import { useCallback, useMemo, useState } from "react";
 
+import RobotBuilderViewport from "@/components/simulator-builder/RobotBuilderViewport";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -23,728 +13,461 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { DEFAULT_BUILDER_LIBRARY } from "@/lib/simulator/builder/defaultLibrary";
-import type {
-  BuilderAssemblyInstance,
-  BuilderComponentCategory,
-  BuilderComponentDefinition,
-  TeacherLessonDraft,
-} from "@/lib/simulator/builder/types";
+import { useRobotBuilderEditor } from "@/lib/simulator/builder/editorStore";
+import {
+  PRIMITIVE_KINDS,
+  normalizeRobotDefinition,
+  serializeRobotDefinition,
+  type PrimitiveKind,
+  type RobotPart,
+  type TransformMode,
+  type Vec3,
+} from "@/lib/simulator/builder/robotSchema";
 
-const STARTER_TELEOP = `package org.firstinspires.ftc.teamcode;
+const TRANSFORM_MODES: TransformMode[] = ["translate", "rotate", "scale"];
 
-import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
-import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
-
-@TeleOp(name = "Student TeleOp")
-public class StudentTeleOp extends LinearOpMode {
-  @Override
-  public void runOpMode() throws Exception {
-    waitForStart();
-
-    while (opModeIsActive()) {
-      // TODO: Drive the robot with the joysticks.
-      // TODO: Map the arm and claw controls.
-      telemetry.addData("status", "student teleop running");
-      sleep(50);
-    }
-  }
-}
-`;
-
-const CATEGORY_OPTIONS: Array<BuilderComponentCategory | "all"> = [
-  "all",
-  "drive",
-  "mechanism",
-  "structure",
-  "sensor",
-  "control",
-];
-
-const makeDraftId = (title: string) =>
-  title
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "teacher-draft";
-
-const makeInstanceId = () =>
-  `instance-${Math.random().toString(36).slice(2, 10)}`;
-
-function getComponentById(
-  library: BuilderComponentDefinition[],
-  componentId: string
-) {
-  return library.find((component) => component.id === componentId) ?? null;
+function toTitleCase(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function suggestDeviceName(
-  component: BuilderComponentDefinition,
-  assembly: BuilderAssemblyInstance[]
-) {
-  if (component.simulatorRole === "driveMotor") {
-    const driveMotors = assembly.filter((instance) =>
-      instance.deviceName.startsWith("leftFront") ||
-      instance.deviceName.startsWith("rightFront") ||
-      instance.deviceName.startsWith("driveMotor")
-    );
-    if (driveMotors.length === 0) {
-      return "leftFront";
-    }
-    if (driveMotors.length === 1) {
-      return "rightFront";
-    }
-  }
-
-  const baseName =
-    component.defaultDeviceName ??
-    component.displayName.charAt(0).toLowerCase() +
-      component.displayName.slice(1).replace(/[^a-zA-Z0-9]/g, "");
-  const existingNames = new Set(assembly.map((instance) => instance.deviceName));
-  if (!existingNames.has(baseName)) {
-    return baseName;
-  }
-
-  let suffix = 2;
-  while (existingNames.has(`${baseName}${suffix}`)) {
-    suffix += 1;
-  }
-  return `${baseName}${suffix}`;
+function parseNumber(value: string, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function createAssemblyInstance(
-  component: BuilderComponentDefinition,
-  assembly: BuilderAssemblyInstance[]
-): BuilderAssemblyInstance {
-  return {
-    instanceId: makeInstanceId(),
-    componentId: component.id,
-    displayName: component.displayName,
-    deviceName: suggestDeviceName(component, assembly),
-    attachmentTargetId: null,
-    attachmentPoint: component.attachmentPoints[0] ?? null,
-    notes: "",
-    colorOverride: component.color,
+function updateVec3(vec: Vec3, index: number, value: string): Vec3 {
+  const next = [...vec] as Vec3;
+  next[index] = parseNumber(value, vec[index]);
+  return next;
+}
+
+function getDescendantPartIds(parts: RobotPart[], partId: string) {
+  const descendants = new Set<string>();
+  const visit = (parentId: string) => {
+    parts
+      .filter((part) => part.parentId === parentId)
+      .forEach((part) => {
+        descendants.add(part.id);
+        visit(part.id);
+      });
   };
+
+  visit(partId);
+  return descendants;
 }
 
-function validateImportedComponent(value: unknown): BuilderComponentDefinition[] {
-  const entries = Array.isArray(value) ? value : [value];
-
-  return entries.map((entry, index) => {
-    if (!entry || typeof entry !== "object") {
-      throw new Error(`Imported item ${index + 1} is not an object.`);
-    }
-
-    const candidate = entry as Partial<BuilderComponentDefinition>;
-    if (!candidate.id || !candidate.displayName || !candidate.category || !candidate.simulatorRole) {
-      throw new Error(
-        `Imported item ${index + 1} must include id, displayName, category, and simulatorRole.`
-      );
-    }
-
-    return {
-      id: candidate.id,
-      displayName: candidate.displayName,
-      category: candidate.category,
-      simulatorRole: candidate.simulatorRole,
-      description: candidate.description ?? "Custom teacher-imported component.",
-      color: candidate.color ?? "#475569",
-      dimensions: candidate.dimensions ?? { width: 4, height: 4, depth: 4 },
-      attachmentPoints: candidate.attachmentPoints ?? ["mount"],
-      defaultDeviceName: candidate.defaultDeviceName,
-      assetSource: "custom",
-      tags: candidate.tags ?? ["custom"],
-    };
-  });
-}
-
-function LibraryCard({
-  component,
-  onAdd,
+function VectorEditor({
+  label,
+  value,
+  step,
+  onChange,
 }: {
-  component: BuilderComponentDefinition;
-  onAdd: (component: BuilderComponentDefinition) => void;
+  label: string;
+  value: Vec3;
+  step: string;
+  onChange: (value: Vec3) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: `library:${component.id}`,
-    data: {
-      source: "library",
-      componentId: component.id,
-    },
-  });
-
   return (
-    <button
-      ref={setNodeRef}
-      type="button"
-      style={{
-        transform: CSS.Translate.toString(transform),
-      }}
-      className={`group w-full rounded-2xl border p-4 text-left transition ${
-        isDragging
-          ? "border-white/30 bg-white/[0.06] opacity-70"
-          : "border-white/10 bg-black hover:border-white/20 hover:bg-[#090909]"
-      }`}
-      {...listeners}
-      {...attributes}
-      onDoubleClick={() => onAdd(component)}
-    >
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div>
-          <div className="font-medium text-white">{component.displayName}</div>
-          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-            {component.category}
-          </div>
-        </div>
-        <div
-          className="h-4 w-4 rounded-full border border-white/20"
-          style={{ backgroundColor: component.color }}
-        />
-      </div>
-      <p className="mb-3 text-sm text-zinc-400">{component.description}</p>
-      <div className="flex items-center justify-between text-xs text-zinc-500">
-        <span>{component.assetSource === "custom" ? "Custom" : "Built-in"}</span>
-        <span>Double-click to add</span>
-      </div>
-    </button>
-  );
-}
-
-function AssemblyCard({
-  instance,
-  component,
-  isSelected,
-  onSelect,
-  onRemove,
-}: {
-  instance: BuilderAssemblyInstance;
-  component: BuilderComponentDefinition | null;
-  isSelected: boolean;
-  onSelect: () => void;
-  onRemove: () => void;
-}) {
-  const draggable = useDraggable({
-    id: instance.instanceId,
-    data: {
-      source: "assembly",
-      instanceId: instance.instanceId,
-    },
-  });
-  const droppable = useDroppable({
-    id: instance.instanceId,
-  });
-
-  return (
-    <div
-      ref={(node) => {
-        draggable.setNodeRef(node);
-        droppable.setNodeRef(node);
-      }}
-      style={{
-        transform: CSS.Translate.toString(draggable.transform),
-      }}
-      className={`rounded-2xl border p-4 transition ${
-        isSelected
-          ? "border-white/25 bg-white/[0.05]"
-          : "border-white/10 bg-black"
-      } ${draggable.isDragging ? "opacity-60" : ""} ${
-        droppable.isOver ? "ring-2 ring-white/30" : ""
-      }`}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <button
-          type="button"
-          className="min-w-0 flex-1 text-left"
-          onClick={onSelect}
-        >
-          <div className="mb-1 flex items-center gap-2">
-            <span
-              className="h-3 w-3 rounded-full border border-white/20"
-              style={{ backgroundColor: instance.colorOverride ?? component?.color ?? "#64748b" }}
+    <div className="rounded-2xl border border-white/10 bg-black p-4">
+      <div className="mb-3 text-xs uppercase tracking-[0.22em] text-zinc-500">{label}</div>
+      <div className="grid grid-cols-3 gap-2">
+        {(["x", "y", "z"] as const).map((axis, index) => (
+          <div key={`${label}-${axis}`} className="space-y-1">
+            <label className="text-xs uppercase text-zinc-500">{axis}</label>
+            <Input
+              type="number"
+              step={step}
+              value={value[index]}
+              onChange={(event) => onChange(updateVec3(value, index, event.target.value))}
+              className="border-white/10 bg-[#050505] text-zinc-100"
             />
-            <span className="truncate font-medium text-white">{instance.displayName}</span>
           </div>
-          <div className="text-sm text-zinc-400">{component?.simulatorRole ?? "unknown role"}</div>
-          <div className="mt-2 font-mono text-xs text-zinc-200">{instance.deviceName}</div>
-        </button>
-        <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            className="rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-300 hover:border-white/20 hover:text-white"
-            {...draggable.listeners}
-            {...draggable.attributes}
-          >
-            Drag
-          </button>
-          <button
-            type="button"
-            className="rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-300 hover:border-white/20 hover:text-white"
-            onClick={onRemove}
-          >
-            Remove
-          </button>
-        </div>
+        ))}
       </div>
     </div>
   );
 }
 
-function AssemblyCanvas({
-  assembly,
-  library,
-  selectedInstanceId,
+function PartListItem({
+  part,
+  depth,
+  childrenByParent,
+  selectedPartId,
   onSelect,
   onRemove,
 }: {
-  assembly: BuilderAssemblyInstance[];
-  library: BuilderComponentDefinition[];
-  selectedInstanceId: string | null;
-  onSelect: (instanceId: string) => void;
-  onRemove: (instanceId: string) => void;
+  part: RobotPart;
+  depth: number;
+  childrenByParent: Map<string | null, RobotPart[]>;
+  selectedPartId: string | null;
+  onSelect: (partId: string) => void;
+  onRemove: (partId: string) => void;
 }) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: "assembly-canvas",
-  });
+  const children = childrenByParent.get(part.id) ?? [];
 
   return (
-    <div
-      ref={setNodeRef}
-      className={`min-h-[520px] rounded-[28px] border p-4 transition ${
-        isOver
-          ? "border-white/25 bg-white/[0.03]"
-          : "border-white/10 bg-[#050505]"
-      }`}
-    >
-      <div className="mb-4 flex items-center justify-between gap-4">
-        <div>
-          <div className="text-sm uppercase tracking-[0.24em] text-zinc-500">
-            Assembly Canvas
-          </div>
-          <div className="text-sm text-zinc-400">
-            Drag from the library or reorder existing parts to shape the robot lesson.
-          </div>
-        </div>
-        <div className="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-400">
-          {assembly.length} part{assembly.length === 1 ? "" : "s"}
-        </div>
-      </div>
-
-      {assembly.length > 0 ? (
-        <div className="space-y-3">
-          {assembly.map((instance) => (
-            <AssemblyCard
-              key={instance.instanceId}
-              instance={instance}
-              component={getComponentById(library, instance.componentId)}
-              isSelected={selectedInstanceId === instance.instanceId}
-              onSelect={() => onSelect(instance.instanceId)}
-              onRemove={() => onRemove(instance.instanceId)}
+    <div className="space-y-2">
+      <div
+        className={`flex items-center gap-3 rounded-2xl border p-3 transition ${
+          selectedPartId === part.id
+            ? "border-white/25 bg-white/[0.06]"
+            : "border-white/10 bg-black hover:border-white/20"
+        }`}
+        style={{ marginLeft: depth * 16 }}
+      >
+        <button type="button" onClick={() => onSelect(part.id)} className="min-w-0 flex-1 text-left">
+          <div className="flex items-center gap-2">
+            <span
+              className="h-3 w-3 shrink-0 rounded-full border border-white/20"
+              style={{ backgroundColor: part.color }}
             />
-          ))}
+            <span className="truncate font-medium text-white">{part.name}</span>
+          </div>
+          <div className="mt-1 truncate font-mono text-xs text-zinc-500">{part.id}</div>
+        </button>
+        <div className="rounded-full border border-white/10 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-zinc-400">
+          {part.kind}
         </div>
-      ) : (
-        <div className="flex min-h-[420px] items-center justify-center rounded-[22px] border border-dashed border-white/10 bg-black px-8 text-center text-zinc-500">
-          Drag a chassis, motors, or mechanisms here to start building a lesson robot.
-        </div>
-      )}
+        <button
+          type="button"
+          onClick={() => onRemove(part.id)}
+          className="rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-400 hover:border-white/20 hover:text-white"
+        >
+          Remove
+        </button>
+      </div>
+      {children.map((child) => (
+        <PartListItem
+          key={child.id}
+          part={child}
+          depth={depth + 1}
+          childrenByParent={childrenByParent}
+          selectedPartId={selectedPartId}
+          onSelect={onSelect}
+          onRemove={onRemove}
+        />
+      ))}
     </div>
   );
 }
 
 export default function SimulatorBuilderClient() {
-  const sensors = useSensors(useSensor(PointerSensor));
-  const [lessonTitle, setLessonTitle] = useState("Teacher Robot Builder");
-  const [objective, setObjective] = useState(
-    "Students finish the TeleOp so the robot can drive, raise the arm, and open the claw."
-  );
-  const [starterCode, setStarterCode] = useState(STARTER_TELEOP);
-  const [categoryFilter, setCategoryFilter] = useState<BuilderComponentCategory | "all">("all");
-  const [library, setLibrary] = useState<BuilderComponentDefinition[]>(DEFAULT_BUILDER_LIBRARY);
-  const [assembly, setAssembly] = useState<BuilderAssemblyInstance[]>([
-    createAssemblyInstance(DEFAULT_BUILDER_LIBRARY[0], []),
-    createAssemblyInstance(DEFAULT_BUILDER_LIBRARY[1], [
-      createAssemblyInstance(DEFAULT_BUILDER_LIBRARY[0], []),
-    ]),
-  ]);
-  const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
+  const { state, actions } = useRobotBuilderEditor();
   const [importText, setImportText] = useState("");
-  const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [jsonStatus, setJsonStatus] = useState<string | null>(null);
 
-  const selectedInstance = assembly.find((instance) => instance.instanceId === selectedInstanceId) ?? null;
-  const selectedComponent = selectedInstance
-    ? getComponentById(library, selectedInstance.componentId)
-    : null;
+  const { robot, selectedPartId, transformMode } = state;
+  const selectedPart = robot.parts.find((part) => part.id === selectedPartId) ?? null;
+  const exportedJson = useMemo(() => serializeRobotDefinition(robot), [robot]);
+  const childrenByParent = useMemo(() => {
+    const groups = new Map<string | null, RobotPart[]>();
+    robot.parts.forEach((part) => {
+      const key = part.parentId ?? null;
+      groups.set(key, [...(groups.get(key) ?? []), part]);
+    });
+    return groups;
+  }, [robot.parts]);
+  const rootParts = robot.rootPartIds
+    .map((partId) => robot.parts.find((part) => part.id === partId))
+    .filter((part): part is RobotPart => Boolean(part));
+  const selectedDescendantIds = selectedPart
+    ? getDescendantPartIds(robot.parts, selectedPart.id)
+    : new Set<string>();
 
-  const filteredLibrary = useMemo(() => {
-    if (categoryFilter === "all") {
-      return library;
-    }
-    return library.filter((component) => component.category === categoryFilter);
-  }, [categoryFilter, library]);
-
-  const lessonDraft = useMemo<TeacherLessonDraft>(
-    () => ({
-      id: makeDraftId(lessonTitle),
-      title: lessonTitle,
-      objective,
-      starterCode,
-      componentLibrary: library,
-      robotAssembly: assembly,
-      simulation: {
-        showGamepad: true,
-        showTelemetry: true,
-        showBridgeLog: true,
-      },
-    }),
-    [assembly, lessonTitle, library, objective, starterCode]
+  const selectPart = useCallback((partId: string | null) => actions.selectPart(partId), [actions]);
+  const updateViewportTransform = useCallback(
+    (partId: string, transform: Pick<RobotPart, "position" | "rotation" | "scale">) => {
+      actions.updatePart(partId, (part) => ({ ...part, ...transform }));
+    },
+    [actions]
   );
 
-  const addComponentToAssembly = (component: BuilderComponentDefinition, index?: number) => {
-    setAssembly((previous) => {
-      const nextInstance = createAssemblyInstance(component, previous);
-      const nextAssembly = [...previous];
-      if (index === undefined || index < 0 || index > nextAssembly.length) {
-        nextAssembly.push(nextInstance);
-      } else {
-        nextAssembly.splice(index, 0, nextInstance);
-      }
-      return nextAssembly;
-    });
-  };
-
-  const moveAssemblyItem = (items: BuilderAssemblyInstance[], from: number, to: number) => {
-    const next = [...items];
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
-    return next;
-  };
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    const activeId = String(event.active.id);
-    const overId = event.over ? String(event.over.id) : null;
-
-    if (!overId) {
-      return;
-    }
-
-    if (activeId.startsWith("library:")) {
-      const componentId = activeId.replace("library:", "");
-      const component = getComponentById(library, componentId);
-      if (!component) {
-        return;
-      }
-
-      if (overId === "assembly-canvas") {
-        addComponentToAssembly(component);
-        return;
-      }
-
-      const targetIndex = assembly.findIndex((instance) => instance.instanceId === overId);
-      addComponentToAssembly(component, targetIndex >= 0 ? targetIndex : undefined);
-      return;
-    }
-
-    if (!assembly.some((instance) => instance.instanceId === activeId)) {
-      return;
-    }
-
-    if (overId === "assembly-canvas") {
-      return;
-    }
-
-    const oldIndex = assembly.findIndex((instance) => instance.instanceId === activeId);
-    const newIndex = assembly.findIndex((instance) => instance.instanceId === overId);
-    if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) {
-      return;
-    }
-
-    setAssembly((previous) => moveAssemblyItem(previous, oldIndex, newIndex));
-  };
-
-  const updateSelectedInstance = (
-    updater: (instance: BuilderAssemblyInstance) => BuilderAssemblyInstance
-  ) => {
-    if (!selectedInstanceId) {
-      return;
-    }
-
-    setAssembly((previous) =>
-      previous.map((instance) =>
-        instance.instanceId === selectedInstanceId ? updater(instance) : instance
-      )
-    );
-  };
-
-  const removeInstance = (instanceId: string) => {
-    setAssembly((previous) => previous.filter((instance) => instance.instanceId !== instanceId));
-    if (selectedInstanceId === instanceId) {
-      setSelectedInstanceId(null);
+  const updateSelectedPart = (updater: (part: RobotPart) => RobotPart) => {
+    if (selectedPart) {
+      actions.updatePart(selectedPart.id, updater);
     }
   };
 
-  const handleImport = () => {
+  const handleImportRobot = () => {
     try {
-      const parsed = JSON.parse(importText);
-      const imported = validateImportedComponent(parsed);
-      setLibrary((previous) => {
-        const existingIds = new Set(previous.map((component) => component.id));
-        const deduped = imported.filter((component) => !existingIds.has(component.id));
-        if (deduped.length === 0) {
-          setImportStatus("No new components were added. Use unique ids for imports.");
-          return previous;
-        }
-        setImportStatus(`Imported ${deduped.length} custom component${deduped.length === 1 ? "" : "s"}.`);
-        return [...previous, ...deduped];
-      });
+      actions.setRobot(normalizeRobotDefinition(JSON.parse(importText)));
       setImportText("");
+      setJsonStatus("Imported robot definition into the builder.");
     } catch (error) {
-      setImportStatus(error instanceof Error ? error.message : "Import failed.");
+      setJsonStatus(error instanceof Error ? error.message : "Import failed.");
     }
   };
 
   return (
-    <div className="min-h-screen bg-black px-5 py-8 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-black px-5 py-8 text-white sm:px-6 lg:px-8">
       <div className="flex w-full flex-col gap-6">
         <div className="rounded-[32px] border border-white/10 bg-[#050505] p-6 shadow-[0_30px_80px_rgba(0,0,0,0.35)]">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div className="max-w-3xl">
               <p className="mb-3 text-[11px] uppercase tracking-[0.34em] text-zinc-500">
-                Builder
+                Robot Builder
               </p>
               <h1 className="mb-3 text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-                Build lesson-ready robots in a cleaner workspace
+                Primitive assembly editor for lesson robots
               </h1>
               <p className="mb-0 max-w-2xl text-base text-zinc-400 sm:text-lg">
-                Assemble parts, configure device names, import custom components, and generate the
-                lesson draft JSON your simulator can consume.
+                Build robots from simple scene parts, keep the RobotDefinition JSON as the source of
+                truth, and leave room for joints and hardware bindings later.
               </p>
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-2xl border border-white/10 bg-black px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.24em] text-zinc-500">
-                  Library
-                </div>
-                <div className="text-2xl font-semibold text-white">{library.length}</div>
+                <div className="text-xs uppercase tracking-[0.24em] text-zinc-500">Parts</div>
+                <div className="text-2xl font-semibold text-white">{robot.parts.length}</div>
               </div>
               <div className="rounded-2xl border border-white/10 bg-black px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.24em] text-zinc-500">
-                  Assembly
-                </div>
-                <div className="text-2xl font-semibold text-white">{assembly.length}</div>
+                <div className="text-xs uppercase tracking-[0.24em] text-zinc-500">Schema</div>
+                <div className="text-2xl font-semibold text-white">v{robot.version}</div>
               </div>
               <div className="rounded-2xl border border-white/10 bg-black px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.24em] text-zinc-500">
-                  Draft Id
+                <div className="text-xs uppercase tracking-[0.24em] text-zinc-500">Selected</div>
+                <div className="truncate text-sm font-medium text-white">
+                  {selectedPart?.name ?? "None"}
                 </div>
-                <div className="truncate text-sm font-medium text-white">{lessonDraft.id}</div>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1.15fr)_380px]">
-          <Card className="border-white/10 bg-[#050505] text-zinc-100 shadow-none">
-            <CardHeader>
-              <CardTitle className="text-xl text-white">Lesson Setup</CardTitle>
-              <CardDescription className="text-zinc-500">
-                Title, objective, and starter code that will ship with the saved robot draft.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm text-zinc-300">Lesson title</label>
-                <Input
-                  value={lessonTitle}
-                  onChange={(event) => setLessonTitle(event.target.value)}
-                  className="border-white/10 bg-black text-zinc-100"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm text-zinc-300">Objective</label>
-                <Textarea
-                  value={objective}
-                  onChange={(event) => setObjective(event.target.value)}
-                  className="min-h-[110px] border-white/10 bg-black text-zinc-100"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm text-zinc-300">Starter Java</label>
-                <Textarea
-                  value={starterCode}
-                  onChange={(event) => setStarterCode(event.target.value)}
-                  className="min-h-[220px] border-white/10 bg-black font-mono text-xs text-zinc-100"
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
-          >
-            <div className="flex flex-col gap-6">
-              <Card className="border-white/10 bg-[#050505] text-zinc-100 shadow-none">
-                <CardHeader className="pb-4">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                    <div>
-                      <CardTitle className="text-xl text-white">Component Library</CardTitle>
-                      <CardDescription className="text-zinc-500">
-                        Drag parts into the robot assembly or double-click to add instantly.
-                      </CardDescription>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {CATEGORY_OPTIONS.map((option) => (
-                        <button
-                          key={option}
-                          type="button"
-                          onClick={() => setCategoryFilter(option)}
-                          className={`rounded-full border px-3 py-1.5 text-xs uppercase tracking-[0.18em] transition ${
-                            categoryFilter === option
-                              ? "border-white/20 bg-white text-black"
-                              : "border-white/10 bg-black text-zinc-500 hover:border-white/20 hover:text-zinc-200"
-                          }`}
-                        >
-                          {option}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {filteredLibrary.map((component) => (
-                      <LibraryCard
-                        key={component.id}
-                        component={component}
-                        onAdd={addComponentToAssembly}
-                      />
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <AssemblyCanvas
-                assembly={assembly}
-                library={library}
-                selectedInstanceId={selectedInstanceId}
-                onSelect={setSelectedInstanceId}
-                onRemove={removeInstance}
-              />
-            </div>
-          </DndContext>
-
+        <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1.2fr)_390px]">
           <div className="flex flex-col gap-6">
             <Card className="border-white/10 bg-[#050505] text-zinc-100 shadow-none">
               <CardHeader>
-                <CardTitle className="text-xl text-white">Inspector</CardTitle>
+                <CardTitle className="text-xl text-white">Robot Setup</CardTitle>
                 <CardDescription className="text-zinc-500">
-                  Tune the selected part and assign the device names your students will code
-                  against.
+                  Current in-memory robot definition for this builder session.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {selectedInstance && selectedComponent ? (
+                <div className="space-y-2">
+                  <label className="text-sm text-zinc-300">Robot name</label>
+                  <Input
+                    value={robot.name}
+                    onChange={(event) => actions.setRobotName(event.target.value)}
+                    className="border-white/10 bg-black text-zinc-100"
+                  />
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-black p-4 text-sm text-zinc-400">
+                  Primitive parts are the source of truth for this phase. Future joints, mount
+                  points, sensors, and hardware bindings should extend the RobotDefinition schema.
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-white/10 bg-[#050505] text-zinc-100 shadow-none">
+              <CardHeader>
+                <CardTitle className="text-xl text-white">Add Primitive</CardTitle>
+                <CardDescription className="text-zinc-500">
+                  Start simple: boxes, cylinders, spheres, and capsules.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3">
+                {PRIMITIVE_KINDS.map((kind) => (
+                  <Button
+                    key={kind}
+                    type="button"
+                    onClick={() => actions.addPart(kind)}
+                    className="justify-between border border-white/10 bg-black text-zinc-100 hover:bg-white hover:text-black"
+                  >
+                    Add {toTitleCase(kind)}
+                    <span className="text-xs opacity-60">Primitive</span>
+                  </Button>
+                ))}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-6">
+            <Card className="border-white/10 bg-[#050505] text-zinc-100 shadow-none">
+              <CardHeader className="pb-4">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <CardTitle className="text-xl text-white">3D Workspace</CardTitle>
+                    <CardDescription className="text-zinc-500">
+                      Orbit camera controls, viewport selection, and transform gizmos.
+                    </CardDescription>
+                  </div>
+                  <div className="rounded-full border border-white/10 bg-black p-1">
+                    {TRANSFORM_MODES.map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => actions.setTransformMode(mode)}
+                        className={`rounded-full px-3 py-1 text-xs uppercase tracking-[0.16em] transition ${
+                          transformMode === mode
+                            ? "bg-white text-black"
+                            : "text-zinc-500 hover:text-zinc-200"
+                        }`}
+                      >
+                        {mode === "translate" ? "Move" : toTitleCase(mode)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <RobotBuilderViewport
+                  robot={robot}
+                  selectedPartId={selectedPartId}
+                  transformMode={transformMode}
+                  onSelectPart={selectPart}
+                  onPartTransform={updateViewportTransform}
+                />
+              </CardContent>
+            </Card>
+
+            <Card className="border-white/10 bg-[#050505] text-zinc-100 shadow-none">
+              <CardHeader>
+                <CardTitle className="text-xl text-white">Part Hierarchy</CardTitle>
+                <CardDescription className="text-zinc-500">
+                  Parent/child data is in the schema now; reparenting is intentionally minimal.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {rootParts.length > 0 ? (
+                  rootParts.map((part) => (
+                    <PartListItem
+                      key={part.id}
+                      part={part}
+                      depth={0}
+                      childrenByParent={childrenByParent}
+                      selectedPartId={selectedPartId}
+                      onSelect={actions.selectPart}
+                      onRemove={actions.removePart}
+                    />
+                  ))
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-white/10 bg-black p-8 text-center text-zinc-500">
+                    Add a primitive part to start the robot assembly.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-6">
+            <Card className="border-white/10 bg-[#050505] text-zinc-100 shadow-none">
+              <CardHeader>
+                <CardTitle className="text-xl text-white">Properties</CardTitle>
+                <CardDescription className="text-zinc-500">
+                  Edits here update the same RobotPart data rendered in the viewport.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {selectedPart ? (
                   <>
-                    <div
-                      className="rounded-2xl border border-white/10 bg-black p-4"
-                    >
-                      <div className="text-xs uppercase tracking-[0.22em] text-zinc-500">
-                        Selected Component
-                      </div>
-                      <div className="mt-2 text-xl font-medium text-white">
-                        {selectedComponent.displayName}
-                      </div>
-                      <div className="mt-1 text-sm text-zinc-400">
-                        {selectedComponent.description}
-                      </div>
-                    </div>
                     <div className="space-y-2">
-                      <label className="text-sm text-zinc-300">Display name</label>
+                      <label className="text-sm text-zinc-300">Part id</label>
                       <Input
-                        value={selectedInstance.displayName}
-                        onChange={(event) =>
-                          updateSelectedInstance((instance) => ({
-                            ...instance,
-                            displayName: event.target.value,
-                          }))
-                        }
-                        className="border-white/10 bg-black text-zinc-100"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm text-zinc-300">Device name</label>
-                      <Input
-                        value={selectedInstance.deviceName}
-                        onChange={(event) =>
-                          updateSelectedInstance((instance) => ({
-                            ...instance,
-                            deviceName: event.target.value,
-                          }))
-                        }
+                        value={selectedPart.id}
+                        onChange={(event) => actions.updatePartId(selectedPart.id, event.target.value)}
                         className="border-white/10 bg-black font-mono text-zinc-100"
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm text-zinc-300">Attachment target</label>
-                      <select
-                        value={selectedInstance.attachmentTargetId ?? ""}
+                      <label className="text-sm text-zinc-300">Name</label>
+                      <Input
+                        value={selectedPart.name}
                         onChange={(event) =>
-                          updateSelectedInstance((instance) => ({
-                            ...instance,
-                            attachmentTargetId: event.target.value || null,
+                          updateSelectedPart((part) => ({ ...part, name: event.target.value }))
+                        }
+                        className="border-white/10 bg-black text-zinc-100"
+                      />
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <label className="text-sm text-zinc-300">Primitive type</label>
+                        <select
+                          value={selectedPart.kind}
+                          onChange={(event) =>
+                            updateSelectedPart((part) => ({
+                              ...part,
+                              kind: event.target.value as PrimitiveKind,
+                            }))
+                          }
+                          className="flex h-10 w-full rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-zinc-100"
+                        >
+                          {PRIMITIVE_KINDS.map((kind) => (
+                            <option key={kind} value={kind}>
+                              {toTitleCase(kind)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm text-zinc-300">Color</label>
+                        <Input
+                          type="color"
+                          value={selectedPart.color}
+                          onChange={(event) =>
+                            updateSelectedPart((part) => ({ ...part, color: event.target.value }))
+                          }
+                          className="h-10 border-white/10 bg-black p-1"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm text-zinc-300">Parent</label>
+                      <select
+                        value={selectedPart.parentId ?? ""}
+                        onChange={(event) =>
+                          updateSelectedPart((part) => ({
+                            ...part,
+                            parentId: event.target.value || null,
                           }))
                         }
                         className="flex h-10 w-full rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-zinc-100"
                       >
-                        <option value="">No attachment</option>
-                        {assembly
-                          .filter((instance) => instance.instanceId !== selectedInstance.instanceId)
-                          .map((instance) => (
-                            <option key={instance.instanceId} value={instance.instanceId}>
-                              {instance.displayName}
+                        <option value="">Root part</option>
+                        {robot.parts
+                          .filter(
+                            (part) =>
+                              part.id !== selectedPart.id && !selectedDescendantIds.has(part.id)
+                          )
+                          .map((part) => (
+                            <option key={part.id} value={part.id}>
+                              {part.name}
                             </option>
                           ))}
                       </select>
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-sm text-zinc-300">Preferred attachment point</label>
-                      <select
-                        value={selectedInstance.attachmentPoint ?? ""}
+                    <VectorEditor
+                      label="Position"
+                      value={selectedPart.position}
+                      step="0.1"
+                      onChange={(position) => updateSelectedPart((part) => ({ ...part, position }))}
+                    />
+                    <VectorEditor
+                      label="Rotation"
+                      value={selectedPart.rotation}
+                      step="5"
+                      onChange={(rotation) => updateSelectedPart((part) => ({ ...part, rotation }))}
+                    />
+                    <VectorEditor
+                      label="Scale"
+                      value={selectedPart.scale}
+                      step="0.05"
+                      onChange={(scale) => updateSelectedPart((part) => ({ ...part, scale }))}
+                    />
+                    <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black p-4 text-sm text-zinc-300">
+                      <input
+                        type="checkbox"
+                        checked={selectedPart.visible}
                         onChange={(event) =>
-                          updateSelectedInstance((instance) => ({
-                            ...instance,
-                            attachmentPoint: event.target.value || null,
-                          }))
+                          updateSelectedPart((part) => ({ ...part, visible: event.target.checked }))
                         }
-                        className="flex h-10 w-full rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-zinc-100"
-                      >
-                        {selectedComponent.attachmentPoints.map((point) => (
-                          <option key={point} value={point}>
-                            {point}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm text-zinc-300">Teacher notes</label>
-                      <Textarea
-                        value={selectedInstance.notes}
-                        onChange={(event) =>
-                          updateSelectedInstance((instance) => ({
-                            ...instance,
-                            notes: event.target.value,
-                          }))
-                        }
-                        className="min-h-[100px] border-white/10 bg-black text-zinc-100"
                       />
-                    </div>
+                      Visible in viewport
+                    </label>
                   </>
                 ) : (
                   <div className="rounded-2xl border border-dashed border-white/10 bg-black p-8 text-center text-zinc-500">
-                    Select a part from the assembly canvas to edit device names, attachments, and
-                    teacher notes.
+                    Select a part in the viewport or hierarchy to edit its RobotPart properties.
                   </div>
                 )}
               </CardContent>
@@ -752,25 +475,28 @@ export default function SimulatorBuilderClient() {
 
             <Card className="border-white/10 bg-[#050505] text-zinc-100 shadow-none">
               <CardHeader>
-                <CardTitle className="text-xl text-white">Import Custom Components</CardTitle>
+                <CardTitle className="text-xl text-white">Import Robot JSON</CardTitle>
                 <CardDescription className="text-zinc-500">
-                  Paste one component object or an array of component definitions to extend the
-                  teacher library.
+                  Paste a RobotDefinition to replace the current in-memory robot.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <Textarea
                   value={importText}
                   onChange={(event) => setImportText(event.target.value)}
-                  placeholder='{"id":"custom-claw","displayName":"Custom Claw","category":"mechanism","simulatorRole":"claw"}'
+                  placeholder='{"version":1,"name":"Demo Robot","rootPartIds":[],"parts":[]}'
                   className="min-h-[160px] border-white/10 bg-black font-mono text-xs text-zinc-100"
                 />
-                <Button onClick={handleImport} className="w-full border border-white/10 bg-white text-black hover:bg-zinc-200">
-                  Import Component JSON
+                <Button
+                  type="button"
+                  onClick={handleImportRobot}
+                  className="w-full border border-white/10 bg-white text-black hover:bg-zinc-200"
+                >
+                  Import RobotDefinition
                 </Button>
-                {importStatus ? (
+                {jsonStatus ? (
                   <div className="rounded-xl border border-white/10 bg-black px-3 py-2 text-sm text-zinc-300">
-                    {importStatus}
+                    {jsonStatus}
                   </div>
                 ) : null}
               </CardContent>
@@ -778,15 +504,15 @@ export default function SimulatorBuilderClient() {
 
             <Card className="border-white/10 bg-[#050505] text-zinc-100 shadow-none">
               <CardHeader>
-                <CardTitle className="text-xl text-white">Generated Draft JSON</CardTitle>
+                <CardTitle className="text-xl text-white">Export Robot JSON</CardTitle>
                 <CardDescription className="text-zinc-500">
-                  This is the canonical lesson draft the future simulator loader can consume.
+                  This RobotDefinition is the canonical export for the future simulator runtime.
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <Textarea
                   readOnly
-                  value={JSON.stringify(lessonDraft, null, 2)}
+                  value={exportedJson}
                   className="min-h-[360px] border-white/10 bg-black font-mono text-xs text-zinc-100"
                 />
               </CardContent>

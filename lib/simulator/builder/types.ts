@@ -34,6 +34,12 @@ export interface BuilderComponentDefinition {
   tags: string[];
 }
 
+export interface BuilderVector3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
 export interface BuilderAssemblyInstance {
   instanceId: string;
   componentId: string;
@@ -41,6 +47,8 @@ export interface BuilderAssemblyInstance {
   deviceName: string;
   attachmentTargetId: string | null;
   attachmentPoint: string | null;
+  position: BuilderVector3;
+  rotation: BuilderVector3;
   notes: string;
   colorOverride?: string;
 }
