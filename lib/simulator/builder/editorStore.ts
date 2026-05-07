@@ -341,6 +341,12 @@ export function useRobotBuilderEditor(initialRobot = createDefaultRobotDefinitio
           };
         });
       },
+      resetAllJointPreviews() {
+        setState((previous) => ({
+          ...previous,
+          jointPreviewValues: getInitialPreviewValues(previous.robot),
+        }));
+      },
       removePart(partId: string) {
         setState((previous) => {
           const parts = previous.robot.parts

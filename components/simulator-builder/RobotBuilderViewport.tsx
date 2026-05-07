@@ -13,12 +13,26 @@ import type {
   TransformMode,
   Vec3,
 } from "@/lib/simulator/builder/robotSchema";
+import {
+  createPreviewState,
+  getPreviewHardwareRole,
+  getPreviewJointValues,
+  resetPreviewState,
+  updatePreviewState,
+  type PreviewState,
+} from "@/lib/simulator/builder/previewMovement";
 
 interface RobotBuilderViewportProps {
   robot: RobotDefinition;
   selectedPartId: string | null;
   transformMode: TransformMode;
   jointPreviewValues: Record<string, number>;
+  previewMovement: {
+    enabled: boolean;
+    paused: boolean;
+    speed: number;
+    resetVersion: number;
+  };
   onSelectPart: (partId: string | null) => void;
   onPartTransform: (partId: string, transform: Pick<RobotPart, "position" | "rotation" | "scale">) => void;
 }
@@ -88,6 +102,9 @@ function fromObjectTransform(object: THREE.Object3D): Pick<RobotPart, "position"
 }
 
 function applyJointPreview(previewGroup: THREE.Group, joint: JointDefinition, value: number) {
+  previewGroup.position.set(0, 0, 0);
+  previewGroup.quaternion.identity();
+
   if (joint.type === "fixed") {
     return;
   }
@@ -159,10 +176,28 @@ function addJointHelper(previewGroup: THREE.Group, part: RobotPart) {
   }
 }
 
+function addPreviewHardwareMarker(authoredGroup: THREE.Group, part: RobotPart) {
+  const role = getPreviewHardwareRole(part);
+  if (role === "joint") {
+    return;
+  }
+
+  const color = role === "wheel" ? "#38bdf8" : role === "servo" ? "#a78bfa" : "#facc15";
+  const marker = new THREE.Mesh(
+    new THREE.SphereGeometry(0.09, 16, 8),
+    new THREE.MeshBasicMaterial({ color, depthTest: false })
+  );
+  marker.position.set(0, 0.62, 0);
+  marker.renderOrder = 6;
+  marker.userData.partId = part.id;
+  authoredGroup.add(marker);
+}
+
 function createPartObject(
   part: RobotPart,
   selectedPartId: string | null,
-  jointPreviewValues: Record<string, number>
+  jointPreviewValues: Record<string, number>,
+  previewMovementEnabled: boolean
 ): ViewportPartObject {
   const previewGroup = new THREE.Group();
   previewGroup.name = `${part.name} joint preview`;
@@ -185,8 +220,8 @@ function createPartObject(
     color: part.color,
     roughness: 0.64,
     metalness: 0.12,
-    emissive: isSelected ? "#ffffff" : "#000000",
-    emissiveIntensity: isSelected ? 0.18 : 0,
+    emissive: isSelected ? "#ffffff" : previewMovementEnabled && part.joint.type !== "fixed" ? "#38bdf8" : "#000000",
+    emissiveIntensity: isSelected ? 0.18 : previewMovementEnabled && part.joint.type !== "fixed" ? 0.12 : 0,
   });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.castShadow = true;
@@ -202,7 +237,14 @@ function createPartObject(
     edges.userData.partId = part.id;
     authoredGroup.add(edges);
     addMountPointHelpers(authoredGroup, part);
+  }
+
+  if (isSelected || (previewMovementEnabled && part.joint.type !== "fixed")) {
     addJointHelper(previewGroup, part);
+  }
+
+  if (previewMovementEnabled) {
+    addPreviewHardwareMarker(authoredGroup, part);
   }
 
   return { previewGroup, authoredGroup };
@@ -213,6 +255,7 @@ export default function RobotBuilderViewport({
   selectedPartId,
   transformMode,
   jointPreviewValues,
+  previewMovement,
   onSelectPart,
   onPartTransform,
 }: RobotBuilderViewportProps) {
@@ -220,12 +263,58 @@ export default function RobotBuilderViewport({
   const partsRootRef = useRef<THREE.Group | null>(null);
   const transformControlsRef = useRef<TransformControls | null>(null);
   const partObjectsRef = useRef<Map<string, THREE.Object3D>>(new Map());
+  const previewObjectsRef = useRef<Map<string, THREE.Group>>(new Map());
   const selectedPartIdRef = useRef<string | null>(selectedPartId);
   const onPartTransformRef = useRef(onPartTransform);
+  const robotRef = useRef(robot);
+  const jointPreviewValuesRef = useRef(jointPreviewValues);
+  const previewMovementRef = useRef(previewMovement);
+  const previewStateRef = useRef<PreviewState>(createPreviewState(robot));
 
   useEffect(() => {
     selectedPartIdRef.current = selectedPartId;
   }, [selectedPartId]);
+
+  useEffect(() => {
+    robotRef.current = robot;
+    previewStateRef.current = previewMovementRef.current.enabled
+      ? resetPreviewState(robot, true)
+      : resetPreviewState(robot, false);
+  }, [robot]);
+
+  useEffect(() => {
+    jointPreviewValuesRef.current = jointPreviewValues;
+  }, [jointPreviewValues]);
+
+  useEffect(() => {
+    const previousSettings = previewMovementRef.current;
+    const wasEnabled = previousSettings.enabled;
+    previewMovementRef.current = previewMovement;
+
+    if (
+      previewMovement.enabled &&
+      (!wasEnabled || previewMovement.resetVersion !== previousSettings.resetVersion)
+    ) {
+      previewStateRef.current = resetPreviewState(robotRef.current, true);
+      previewObjectsRef.current.forEach((object, partId) => {
+        const part = robotRef.current.parts.find((entry) => entry.id === partId);
+        if (part) {
+          applyJointPreview(object, part.joint, part.joint.initialValue ?? 0);
+        }
+      });
+      return;
+    }
+
+    if (!previewMovement.enabled && wasEnabled) {
+      previewStateRef.current = resetPreviewState(robotRef.current, false);
+      previewObjectsRef.current.forEach((object, partId) => {
+        const part = robotRef.current.parts.find((entry) => entry.id === partId);
+        if (part) {
+          applyJointPreview(object, part.joint, jointPreviewValuesRef.current[partId] ?? part.joint.initialValue ?? 0);
+        }
+      });
+    }
+  }, [previewMovement]);
 
   useEffect(() => {
     onPartTransformRef.current = onPartTransform;
@@ -351,7 +440,31 @@ export default function RobotBuilderViewport({
     resizeObserver.observe(container);
 
     let frameId = 0;
-    const tick = () => {
+    let lastTime = performance.now();
+    const tick = (time: number) => {
+      const deltaSeconds = Math.min(0.05, Math.max(0, (time - lastTime) / 1000));
+      lastTime = time;
+
+      const previewSettings = previewMovementRef.current;
+      const currentRobot = robotRef.current;
+
+      if (previewSettings.enabled && !previewSettings.paused) {
+        previewStateRef.current = updatePreviewState(
+          currentRobot,
+          previewStateRef.current,
+          deltaSeconds,
+          previewSettings.speed
+        );
+
+        const values = getPreviewJointValues(currentRobot, previewStateRef.current);
+        currentRobot.parts.forEach((part) => {
+          const object = previewObjectsRef.current.get(part.id);
+          if (object) {
+            applyJointPreview(object, part.joint, values[part.id] ?? part.joint.initialValue ?? 0);
+          }
+        });
+      }
+
       orbitControls.update();
       renderer.render(scene, camera);
       frameId = window.requestAnimationFrame(tick);
@@ -370,6 +483,7 @@ export default function RobotBuilderViewport({
       orbitControls.dispose();
       disposeObject3D(partsRoot);
       partObjectsRef.current.clear();
+      previewObjectsRef.current.clear();
       partsRootRef.current = null;
       transformControlsRef.current = null;
       renderer.dispose();
@@ -389,10 +503,17 @@ export default function RobotBuilderViewport({
       disposeObject3D(child);
     }
 
-    const objectMap = new Map<string, THREE.Object3D>();
+    const objectMap = new Map<string, THREE.Group>();
     const authoredMap = new Map<string, THREE.Object3D>();
     robot.parts.forEach((part) => {
-      const object = createPartObject(part, selectedPartId, jointPreviewValues);
+      const object = createPartObject(
+        part,
+        selectedPartId,
+        previewMovement.enabled
+          ? getPreviewJointValues(robot, previewStateRef.current)
+          : jointPreviewValues,
+        previewMovement.enabled
+      );
       objectMap.set(part.id, object.previewGroup);
       authoredMap.set(part.id, object.authoredGroup);
     });
@@ -411,15 +532,17 @@ export default function RobotBuilderViewport({
     });
 
     partObjectsRef.current = authoredMap;
+    previewObjectsRef.current = objectMap;
 
     const transformControls = transformControlsRef.current;
-    const selectedObject = selectedPartId ? authoredMap.get(selectedPartId) : null;
+    const selectedObject =
+      !previewMovement.enabled && selectedPartId ? authoredMap.get(selectedPartId) : null;
     if (transformControls && selectedObject) {
       transformControls.attach(selectedObject);
     } else {
       transformControls?.detach();
     }
-  }, [jointPreviewValues, robot, selectedPartId]);
+  }, [jointPreviewValues, previewMovement.enabled, robot, selectedPartId]);
 
   useEffect(() => {
     transformControlsRef.current?.setMode(transformMode);
@@ -435,8 +558,14 @@ export default function RobotBuilderViewport({
         </div>
       </div>
       <div className="pointer-events-none absolute right-4 top-4 rounded-2xl border border-white/10 bg-black/75 px-4 py-3 text-xs text-zinc-400 backdrop-blur">
-        <div className="font-medium text-zinc-200">Mode: {transformMode}</div>
-        <div className="mt-1">Move 0.1, rotate 5 deg, scale 0.05</div>
+        <div className="font-medium text-zinc-200">
+          {previewMovement.enabled ? "Preview Movement" : `Mode: ${transformMode}`}
+        </div>
+        <div className="mt-1">
+          {previewMovement.enabled
+            ? `${previewMovement.paused ? "Paused" : "Running"} at ${previewMovement.speed.toFixed(1)}x`
+            : "Move 0.1, rotate 5 deg, scale 0.05"}
+        </div>
       </div>
       <div className="pointer-events-none absolute bottom-4 right-4 rounded-full border border-white/10 bg-black/75 px-3 py-1 text-xs text-zinc-400 backdrop-blur">
         X red, Y green, Z blue

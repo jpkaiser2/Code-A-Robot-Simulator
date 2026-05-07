@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useRobotBuilderEditor } from "@/lib/simulator/builder/editorStore";
+import { getPreviewWarnings } from "@/lib/simulator/builder/previewMovement";
 import {
   PRIMITIVE_KINDS,
   normalizeRobotDefinition,
@@ -393,6 +394,12 @@ export default function SimulatorBuilderClient() {
   const { state, actions } = useRobotBuilderEditor();
   const [importText, setImportText] = useState("");
   const [jsonStatus, setJsonStatus] = useState<string | null>(null);
+  const [previewMovement, setPreviewMovement] = useState({
+    enabled: false,
+    paused: false,
+    speed: 1,
+    resetVersion: 0,
+  });
 
   const { robot, selectedPartId, transformMode, jointPreviewValues } = state;
   const selectedPart = robot.parts.find((part) => part.id === selectedPartId) ?? null;
@@ -403,6 +410,7 @@ export default function SimulatorBuilderClient() {
     ? jointPreviewValues[selectedPart.id] ?? selectedPart.joint.initialValue ?? 0
     : 0;
   const exportedJson = useMemo(() => serializeRobotDefinition(robot), [robot]);
+  const previewWarnings = useMemo(() => getPreviewWarnings(robot), [robot]);
   const childrenByParent = useMemo(() => {
     const groups = new Map<string | null, RobotPart[]>();
     robot.parts.forEach((part) => {
@@ -435,11 +443,31 @@ export default function SimulatorBuilderClient() {
   const handleImportRobot = () => {
     try {
       actions.setRobot(normalizeRobotDefinition(JSON.parse(importText)));
+      setPreviewMovement((previous) => ({ ...previous, enabled: false, paused: false }));
       setImportText("");
       setJsonStatus("Imported robot definition into the builder.");
     } catch (error) {
       setJsonStatus(error instanceof Error ? error.message : "Import failed.");
     }
+  };
+
+  const togglePreviewMovement = () => {
+    actions.resetAllJointPreviews();
+    setPreviewMovement((previous) => ({
+      ...previous,
+      enabled: !previous.enabled,
+      paused: false,
+      resetVersion: previous.resetVersion + 1,
+    }));
+  };
+
+  const resetPreviewPose = () => {
+    actions.resetAllJointPreviews();
+    setPreviewMovement((previous) => ({
+      ...previous,
+      paused: false,
+      resetVersion: previous.resetVersion + 1,
+    }));
   };
 
   return (
@@ -456,7 +484,7 @@ export default function SimulatorBuilderClient() {
               </h1>
               <p className="mb-0 max-w-2xl text-base text-zinc-400 sm:text-lg">
                 Build robots from simple scene parts, keep the RobotDefinition JSON as the source of
-                truth, and leave room for joints and hardware bindings later.
+                truth, and validate joints with non-destructive movement previews.
               </p>
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
@@ -536,21 +564,81 @@ export default function SimulatorBuilderClient() {
                       Orbit camera controls, viewport selection, and transform gizmos.
                     </CardDescription>
                   </div>
-                  <div className="rounded-full border border-white/10 bg-black p-1">
-                    {TRANSFORM_MODES.map((mode) => (
-                      <button
-                        key={mode}
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <div className="rounded-full border border-white/10 bg-black p-1">
+                      {TRANSFORM_MODES.map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          disabled={previewMovement.enabled}
+                          onClick={() => actions.setTransformMode(mode)}
+                          className={`rounded-full px-3 py-1 text-xs uppercase tracking-[0.16em] transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                            transformMode === mode
+                              ? "bg-white text-black"
+                              : "text-zinc-500 hover:text-zinc-200"
+                          }`}
+                        >
+                          {mode === "translate" ? "Move" : toTitleCase(mode)}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-black p-2">
+                      <Button
                         type="button"
-                        onClick={() => actions.setTransformMode(mode)}
-                        className={`rounded-full px-3 py-1 text-xs uppercase tracking-[0.16em] transition ${
-                          transformMode === mode
-                            ? "bg-white text-black"
-                            : "text-zinc-500 hover:text-zinc-200"
+                        onClick={togglePreviewMovement}
+                        className={`border border-white/10 ${
+                          previewMovement.enabled
+                            ? "bg-[#f97316] text-black hover:bg-[#fb923c]"
+                            : "bg-white text-black hover:bg-zinc-200"
                         }`}
                       >
-                        {mode === "translate" ? "Move" : toTitleCase(mode)}
-                      </button>
-                    ))}
+                        {previewMovement.enabled ? "Stop Preview" : "Preview Movement"}
+                      </Button>
+                      <Button
+                        type="button"
+                        disabled={!previewMovement.enabled}
+                        onClick={() =>
+                          setPreviewMovement((previous) => ({
+                            ...previous,
+                            paused: !previous.paused,
+                          }))
+                        }
+                        className="border border-white/10 bg-black text-zinc-100 hover:bg-white hover:text-black disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {previewMovement.paused ? "Resume" : "Pause"}
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={resetPreviewPose}
+                        className="border border-white/10 bg-black text-zinc-100 hover:bg-white hover:text-black"
+                      >
+                        Reset Pose
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-col gap-3 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-xs uppercase tracking-[0.22em] text-zinc-500">
+                    Preview speed
+                  </div>
+                  <div className="flex min-w-0 flex-1 items-center gap-3 sm:max-w-sm">
+                    <input
+                      type="range"
+                      min={0.25}
+                      max={3}
+                      step={0.25}
+                      value={previewMovement.speed}
+                      onChange={(event) =>
+                        setPreviewMovement((previous) => ({
+                          ...previous,
+                          speed: Number(event.target.value),
+                        }))
+                      }
+                      className="w-full"
+                    />
+                    <div className="w-12 text-right font-mono text-sm text-zinc-300">
+                      {previewMovement.speed.toFixed(2)}x
+                    </div>
                   </div>
                 </div>
               </CardHeader>
@@ -560,11 +648,45 @@ export default function SimulatorBuilderClient() {
                   selectedPartId={selectedPartId}
                   transformMode={transformMode}
                   jointPreviewValues={jointPreviewValues}
+                  previewMovement={previewMovement}
                   onSelectPart={selectPart}
                   onPartTransform={updateViewportTransform}
                 />
               </CardContent>
             </Card>
+
+            {previewMovement.enabled ? (
+              <Card className="border-white/10 bg-[#050505] text-zinc-100 shadow-none">
+                <CardHeader>
+                  <CardTitle className="text-xl text-white">Preview Validation</CardTitle>
+                  <CardDescription className="text-zinc-500">
+                    Lightweight rig warnings detected during movement preview.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {previewWarnings.length > 0 ? (
+                    previewWarnings.map((warning) => (
+                      <button
+                        key={`${warning.partId}-${warning.message}`}
+                        type="button"
+                        onClick={() => actions.selectPart(warning.partId)}
+                        className="w-full rounded-xl border border-[#f97316]/30 bg-[#f97316]/10 px-3 py-2 text-left text-sm text-zinc-200 hover:border-[#fb923c]/60"
+                      >
+                        <span className="font-medium text-white">{warning.partName}</span>
+                        <span className="ml-2 font-mono text-xs text-zinc-500">
+                          {warning.partId}
+                        </span>
+                        <span className="mt-1 block text-zinc-300">{warning.message}</span>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="rounded-xl border border-white/10 bg-black px-3 py-2 text-sm text-zinc-400">
+                      No obvious rig issues detected.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ) : null}
 
             <Card className="border-white/10 bg-[#050505] text-zinc-100 shadow-none">
               <CardHeader>
