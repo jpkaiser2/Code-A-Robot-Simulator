@@ -9,12 +9,24 @@ tags:
   - ftc
   - roadmap
   - architecture
-status: proposed
+status: in-progress
 priority: critical
 last-reviewed: 2026-09-05
 ---
 
 # FTC builder rebuild plan
+
+## Implementation status
+
+> [!success] Foundation started — 2026-09-05
+> Work package 1 is implemented under `lib/robot`: v3 domain and catalog types, strict structural
+> and semantic validation, quaternion/axis normalization, JSON parsing/serialization, an explicit
+> legacy import boundary, a golden FTC arm/claw fixture, and executable contract tests.
+
+Current boundary: these modules are not yet connected to the builder or simulator UI. Version 2 is
+recognized as requiring migration, but the migration itself intentionally waits for the legacy-part
+policy. The next critical-path task is the first validated catalog entry and repeatable asset
+pipeline.
 
 ## Outcome
 
@@ -494,10 +506,10 @@ JSON:
 
 - [ ] Select the first structural ecosystem and exact reference robot.
 - [ ] Confirm permission/licensing policy for vendor CAD derivatives and thumbnails.
-- [ ] Approve meters/radians internally and millimeters/degrees in builder UI.
-- [ ] Approve v3 as a normalized document with external catalog references.
+- [x] Use meters/radians internally and millimeters/degrees in builder UI.
+- [x] Use v3 as a normalized document with external catalog references.
 - [ ] Decide whether v2 primitive robots receive a best-effort migration or remain legacy-only.
-- [ ] Approve the initial four joint types and generic transmission model.
+- [x] Use the initial four joint types and generic transmission model.
 - [ ] Choose the baseline browser/device and asset/performance budgets.
 - [ ] Spike Rapier against the reference mechanism and decide whether MVP runtime is kinematic,
   physics-backed, or hybrid.

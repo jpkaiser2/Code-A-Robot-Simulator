@@ -12,6 +12,11 @@ last-reviewed: 2026-09-05
 
 # `RobotDefinition` schema
 
+> [!info] Replacement contract in progress
+> This note describes the schema used by the current builder. The catalog-backed v3 contracts are
+> now implemented under `lib/robot/schema` but are not wired into either UI yet. Their design and
+> cutover plan are documented in [[10 - FTC Builder Rebuild Plan]].
+
 `RobotDefinition` is the active builder's canonical, JSON-serializable robot contract. The current
 schema version is 2. Its TypeScript definition and normalization functions live in
 `lib/simulator/builder/robotSchema.ts`.

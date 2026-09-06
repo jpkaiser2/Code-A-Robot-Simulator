@@ -24,11 +24,13 @@ No environment variables are currently required.
 ```bash
 npm install
 npm run dev
+npm test
 npm run build
 npm start
 ```
 
-The repository currently defines no lint, format, unit-test, or end-to-end-test scripts.
+`npm test` runs the v3 robot-document contract tests through Node's test runner and `tsx`. The
+repository does not yet define lint, format, or end-to-end-test scripts.
 
 ## Local routes
 
@@ -53,6 +55,7 @@ components/
   simulator/                        Java harness, runtime scene, DS, gamepad
   ui/                               local UI primitives
 lib/
+  robot/                             v3 schema, catalog contracts, fixtures, tests
   simulator/mechanismSimulator.ts   simulator state, reducer, step, bridge
   simulator/builder/                schema, editor state, preview, old library scaffold
 public/

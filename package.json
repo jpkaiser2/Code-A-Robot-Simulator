@@ -4,6 +4,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "test": "tsx --test lib/robot/schema/robotDocument.test.mts",
     "start": "next start"
   },
   "dependencies": {
@@ -17,8 +18,8 @@
     "react": "^18.2.0",
     "react-ace": "^14.0.1",
     "react-dom": "^18.2.0",
-    "three": "^0.183.2",
-    "tailwind-merge": "^2.6.0"
+    "tailwind-merge": "^2.6.0",
+    "three": "^0.183.2"
   },
   "devDependencies": {
     "@types/node": "22.10.2",
@@ -29,6 +30,7 @@
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",
+    "tsx": "^4.23.13",
     "typescript": "5.7.2"
   }
 }
