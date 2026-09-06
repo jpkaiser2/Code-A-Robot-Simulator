@@ -77,7 +77,7 @@ replace missing mass and center-of-mass values with sourced or clearly marked me
 
 ## Next work
 
-Build the assembly transform/snapping kernel against these connector records. Once connector-frame
-alignment is proven by deterministic unit tests, add the first motor, wheel, structural channel,
-shaft/hub, and servo entries needed for the end-to-end reference mechanism in [[10 - FTC Builder
-Rebuild Plan]].
+The assembly transform/snapping kernel is now implemented in [[12 - Assembly and Snapping Kernel]].
+Next, add the first motor, wheel, structural channel, shaft/hub, and servo entries needed for the
+end-to-end reference mechanism while the joint/transmission evaluator is developed against the same
+connector and document contracts.

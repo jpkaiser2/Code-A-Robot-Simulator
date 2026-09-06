@@ -4,7 +4,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "test": "tsx --test lib/robot/schema/robotDocument.test.mts lib/robot/catalog/catalog.test.mts",
+    "test": "tsx --test lib/robot/schema/robotDocument.test.mts lib/robot/catalog/catalog.test.mts lib/robot/assembly/assembly.test.mts",
     "parts:build": "tsx scripts/parts/build-catalog.mts",
     "start": "next start"
   },

@@ -31,9 +31,9 @@ npm start
 ```
 
 `npm run parts:build` regenerates the built-in real-parts assets and runtime manifest, then checks
-GLB structure, provenance, hashes, and byte/triangle budgets. `npm test` runs the v3 robot-document
-and parts-catalog contract tests through Node's test runner and `tsx`. The repository does not yet
-define lint, format, or end-to-end-test scripts.
+GLB structure, provenance, hashes, and byte/triangle budgets. `npm test` runs the v3 robot-document,
+parts-catalog, and assembly-kernel contract tests through Node's test runner and `tsx`. The
+repository does not yet define lint, format, or end-to-end-test scripts.
 
 ## Local routes
 
@@ -58,7 +58,10 @@ components/
   simulator/                        Java harness, runtime scene, DS, gamepad
   ui/                               local UI primitives
 lib/
-  robot/                             v3 schema, catalog validation/index, fixtures, tests
+  robot/assembly/                    transform math, snapping, commands, history, validation
+  robot/catalog/                     real-part contracts, validation, lookup, compatibility
+  robot/fixtures/                    golden v3 robot documents
+  robot/schema/                      v3 document contract, validation, serialization, migration
   simulator/mechanismSimulator.ts   simulator state, reducer, step, bridge
   simulator/builder/                schema, editor state, preview, old library scaffold
 public/

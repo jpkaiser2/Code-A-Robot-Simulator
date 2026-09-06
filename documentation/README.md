@@ -33,6 +33,7 @@ Mermaid architecture diagrams.
 - [[09 - Current Constraints and Decisions]] — limitations, risks, and architectural decisions
 - [[10 - FTC Builder Rebuild Plan]] — efficient plan for real parts, working joints, and runtime import
 - [[11 - Parts Catalog Pipeline]] — source policy, generated assets, validation, and contribution flow
+- [[12 - Assembly and Snapping Kernel]] — connector frames, rigid groups, edit commands, and history
 - [[Glossary]] — project and FTC terminology
 
 ## Documentation map
@@ -50,6 +51,7 @@ flowchart TD
     Architecture --> Decisions[Constraints and Decisions]
     Roadmap --> Rebuild[FTC Builder Rebuild Plan]
     Rebuild --> Catalog[Parts Catalog Pipeline]
+    Rebuild --> Assembly[Assembly and Snapping Kernel]
 ```
 
 ## Status vocabulary

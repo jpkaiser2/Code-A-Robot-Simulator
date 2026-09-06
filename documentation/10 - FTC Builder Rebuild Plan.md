@@ -33,9 +33,18 @@ records provenance, bounds, collider, mounting connector, device ports, byte/tri
 asset hash. Run `npm run parts:build` to regenerate and verify it. See [[11 - Parts Catalog
 Pipeline]].
 
-The next critical-path task is the assembly transform/snapping kernel: rigid-group transforms,
-connector-frame alignment, compatibility enforcement, and deterministic connect/disconnect commands
-with undo/redo tests. Catalog breadth should continue after that kernel proves the metadata model.
+The catalog slice established the input for the next completed milestone: the assembly
+transform/snapping kernel. Catalog breadth can now continue against proven connector semantics.
+
+> [!success] Assembly kernel implemented — 2026-09-05
+> The pure `lib/robot/assembly` layer now provides quaternion/rigid-transform math, stable rigid-group
+> traversal, connector rotation quantization, whole-subassembly snapping, connect/disconnect/move
+> commands, structurally shared undo/redo history, and catalog-aware import validation. Mechanical
+> joints deliberately remain rigid-group boundaries. See [[12 - Assembly and Snapping Kernel]].
+
+The next critical-path task is the joint/transmission evaluator with a common kinematic result for
+builder preview and simulator import. It must cover fixed, revolute, continuous, and prismatic
+joints, limits, initial positions, axes, and actuator transmission mapping before UI replacement.
 
 ## Outcome
 
