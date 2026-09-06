@@ -1,0 +1,254 @@
+{
+  "version": "2026.09.1",
+  "generatedAt": "2026-09-05T00:00:00.000Z",
+  "parts": [
+    {
+      "id": "rev:REV-31-1595",
+      "vendor": "REV Robotics",
+      "sku": "REV-31-1595",
+      "name": "Control Hub",
+      "category": "controller",
+      "lifecycle": "active",
+      "source": {
+        "productUrl": "https://www.revrobotics.com/rev-31-1595/",
+        "retrievedAt": "2026-09-05",
+        "licenseStatus": "approved",
+        "attribution": "Product identity and published dimensions © REV Robotics.",
+        "notes": "The distributed GLB is an original simplified Code-A-Robot model made from published dimensions; it is not vendor CAD."
+      },
+      "visual": {
+        "kind": "glb",
+        "uri": "/robot-parts/rev/rev-31-1595.glb",
+        "boundsM": [
+          0.143,
+          0.0295,
+          0.13
+        ],
+        "origin": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        },
+        "byteSize": 36208,
+        "sha256": "ac62e005c56de7af90a0e4ddf6f131455f02b47d1ddefb6d66bc8d41301e942d",
+        "triangleCount": 252
+      },
+      "physical": {
+        "colliders": [
+          {
+            "kind": "box",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "halfExtents": [
+              0.0715,
+              0.01475,
+              0.065
+            ]
+          }
+        ]
+      },
+      "connectors": [
+        {
+          "id": "bottom-mount-pattern",
+          "name": "Bottom REV mounting pattern",
+          "kind": "mountPattern",
+          "profile": "revPattern",
+          "frame": {
+            "position": [
+              0,
+              -0.01475,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ]
+          },
+          "gender": "neutral",
+          "accepts": [
+            "revPattern",
+            "profile:revPattern"
+          ],
+          "rotationSteps": 4
+        }
+      ],
+      "device": {
+        "kind": "controlHub",
+        "ports": [
+          {
+            "id": "motor:0",
+            "accepts": [
+              "dcMotor"
+            ]
+          },
+          {
+            "id": "motor:1",
+            "accepts": [
+              "dcMotor"
+            ]
+          },
+          {
+            "id": "motor:2",
+            "accepts": [
+              "dcMotor"
+            ]
+          },
+          {
+            "id": "motor:3",
+            "accepts": [
+              "dcMotor"
+            ]
+          },
+          {
+            "id": "servo:0",
+            "accepts": [
+              "servo",
+              "crServo"
+            ]
+          },
+          {
+            "id": "servo:1",
+            "accepts": [
+              "servo",
+              "crServo"
+            ]
+          },
+          {
+            "id": "servo:2",
+            "accepts": [
+              "servo",
+              "crServo"
+            ]
+          },
+          {
+            "id": "servo:3",
+            "accepts": [
+              "servo",
+              "crServo"
+            ]
+          },
+          {
+            "id": "servo:4",
+            "accepts": [
+              "servo",
+              "crServo"
+            ]
+          },
+          {
+            "id": "servo:5",
+            "accepts": [
+              "servo",
+              "crServo"
+            ]
+          },
+          {
+            "id": "digital:0",
+            "accepts": [
+              "touch"
+            ]
+          },
+          {
+            "id": "digital:1",
+            "accepts": [
+              "touch"
+            ]
+          },
+          {
+            "id": "digital:2",
+            "accepts": [
+              "touch"
+            ]
+          },
+          {
+            "id": "digital:3",
+            "accepts": [
+              "touch"
+            ]
+          },
+          {
+            "id": "digital:4",
+            "accepts": [
+              "touch"
+            ]
+          },
+          {
+            "id": "digital:5",
+            "accepts": [
+              "touch"
+            ]
+          },
+          {
+            "id": "digital:6",
+            "accepts": [
+              "touch"
+            ]
+          },
+          {
+            "id": "digital:7",
+            "accepts": [
+              "touch"
+            ]
+          },
+          {
+            "id": "i2c:0",
+            "accepts": [
+              "distance",
+              "color",
+              "imu"
+            ]
+          },
+          {
+            "id": "i2c:1",
+            "accepts": [
+              "distance",
+              "color",
+              "imu"
+            ]
+          },
+          {
+            "id": "i2c:2",
+            "accepts": [
+              "distance",
+              "color",
+              "imu"
+            ]
+          },
+          {
+            "id": "i2c:3",
+            "accepts": [
+              "distance",
+              "color",
+              "imu"
+            ]
+          },
+          {
+            "id": "internal:imu",
+            "accepts": [
+              "imu"
+            ]
+          }
+        ]
+      },
+      "tags": [
+        "FTC",
+        "REV DUO",
+        "hub",
+        "controller",
+        "electronics"
+      ]
+    }
+  ]
+}

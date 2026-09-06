@@ -32,6 +32,7 @@ Mermaid architecture diagrams.
 - [[08 - Roadmap]] — proposed path from prototype to Code-A-Robot integration
 - [[09 - Current Constraints and Decisions]] — limitations, risks, and architectural decisions
 - [[10 - FTC Builder Rebuild Plan]] — efficient plan for real parts, working joints, and runtime import
+- [[11 - Parts Catalog Pipeline]] — source policy, generated assets, validation, and contribution flow
 - [[Glossary]] — project and FTC terminology
 
 ## Documentation map
@@ -48,6 +49,7 @@ flowchart TD
     Overview --> Roadmap[Roadmap]
     Architecture --> Decisions[Constraints and Decisions]
     Roadmap --> Rebuild[FTC Builder Rebuild Plan]
+    Rebuild --> Catalog[Parts Catalog Pipeline]
 ```
 
 ## Status vocabulary

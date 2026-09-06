@@ -18,15 +18,24 @@ last-reviewed: 2026-09-05
 
 ## Implementation status
 
-> [!success] Foundation started — 2026-09-05
+> [!success] Foundation and first catalog slice implemented — 2026-09-05
 > Work package 1 is implemented under `lib/robot`: v3 domain and catalog types, strict structural
 > and semantic validation, quaternion/axis normalization, JSON parsing/serialization, an explicit
-> legacy import boundary, a golden FTC arm/claw fixture, and executable contract tests.
+> legacy import boundary, a golden FTC arm/claw fixture, and executable contract tests. The catalog
+> now also has strict validation, indexed lookup/search, connector compatibility checks, and a
+> repeatable asset/manifest build.
 
 Current boundary: these modules are not yet connected to the builder or simulator UI. Version 2 is
 recognized as requiring migration, but the migration itself intentionally waits for the legacy-part
-policy. The next critical-path task is the first validated catalog entry and repeatable asset
-pipeline.
+policy. The first real entry is the REV Control Hub (`REV-31-1595`), represented by an original,
+dimensionally scaled low-poly GLB rather than redistributed vendor CAD. Its generated manifest
+records provenance, bounds, collider, mounting connector, device ports, byte/triangle budgets, and
+asset hash. Run `npm run parts:build` to regenerate and verify it. See [[11 - Parts Catalog
+Pipeline]].
+
+The next critical-path task is the assembly transform/snapping kernel: rigid-group transforms,
+connector-frame alignment, compatibility enforcement, and deterministic connect/disconnect commands
+with undo/redo tests. Catalog breadth should continue after that kernel proves the metadata model.
 
 ## Outcome
 

@@ -77,6 +77,7 @@ export interface CatalogVisual {
   origin: RigidTransform;
   triangleCount?: number;
   byteSize?: number;
+  sha256?: string;
 }
 
 export interface CatalogPhysicalProperties {
