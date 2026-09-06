@@ -31,6 +31,7 @@ Mermaid architecture diagrams.
 - [[07 - Developer Guide]] — setup, routes, repository map, and contribution guidance
 - [[08 - Roadmap]] — proposed path from prototype to Code-A-Robot integration
 - [[09 - Current Constraints and Decisions]] — limitations, risks, and architectural decisions
+- [[10 - FTC Builder Rebuild Plan]] — efficient plan for real parts, working joints, and runtime import
 - [[Glossary]] — project and FTC terminology
 
 ## Documentation map
@@ -46,6 +47,7 @@ flowchart TD
     Architecture --> Guide[Developer Guide]
     Overview --> Roadmap[Roadmap]
     Architecture --> Decisions[Constraints and Decisions]
+    Roadmap --> Rebuild[FTC Builder Rebuild Plan]
 ```
 
 ## Status vocabulary

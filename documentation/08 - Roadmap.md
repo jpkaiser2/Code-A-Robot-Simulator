@@ -49,6 +49,9 @@ Exit criterion: current routes behave consistently and critical domain rules hav
 
 Goal: make one robot definition drive authoring and simulation.
 
+The detailed implementation plan for this phase is [[10 - FTC Builder Rebuild Plan]]. That note
+supersedes the brief checklist below where the two differ.
+
 - Extend `RobotDefinition` with explicit hardware bindings rather than name/tag inference.
 - Add robot-level drivetrain configuration, dimensions/units, control hubs, and device inventory.
 - Define versioned schema migrations and compatibility policy.
@@ -152,3 +155,4 @@ These close the builder/runtime gap before adding breadth that would otherwise n
 - [[01 - Project Overview]]
 - [[02 - System Architecture]]
 - [[09 - Current Constraints and Decisions]]
+- [[10 - FTC Builder Rebuild Plan]]

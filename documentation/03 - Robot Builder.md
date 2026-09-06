@@ -10,6 +10,10 @@ last-reviewed: 2026-09-05
 
 # Robot builder
 
+> [!warning] Replacement planned
+> This note documents the current primitive builder. It is not the target architecture. The
+> replacement design and execution order are in [[10 - FTC Builder Rebuild Plan]].
+
 The robot builder at `/simulator-builder` is a client-side editor for creating a hierarchical robot
 from simple 3D primitives. Its canonical output is `RobotDefinition` JSON.
 
@@ -141,3 +145,4 @@ be introduced through versioned migrations rather than as UI-only state.
 - [[02 - System Architecture]]
 - [[06 - RobotDefinition Schema]]
 - [[08 - Roadmap]]
+- [[10 - FTC Builder Rebuild Plan]]

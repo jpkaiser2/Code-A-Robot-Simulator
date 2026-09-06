@@ -158,4 +158,5 @@ The project has two robot models today:
 
 The highest-leverage future change is a translation/runtime layer that loads `RobotDefinition`,
 binds named hardware devices to joints or drivetrain roles, and generates both the runtime scene
-and simulator devices from the same configuration. See [[08 - Roadmap]].
+and simulator devices from the same configuration. See [[10 - FTC Builder Rebuild Plan]] for the
+detailed replacement architecture and efficient delivery order.
